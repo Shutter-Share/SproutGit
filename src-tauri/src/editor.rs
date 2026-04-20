@@ -1,7 +1,7 @@
 use serde::Serialize;
 use std::path::Path;
 
-use crate::helpers::{
+use crate::git::helpers::{
     command_exists, normalize_existing_path, run_git, system_command, validate_git_config_key,
     validate_no_control_chars, validate_non_option_value, GitAction, SystemAction,
 };
@@ -29,16 +29,68 @@ struct EditorCandidate {
 
 fn known_editors() -> Vec<EditorCandidate> {
     vec![
-        EditorCandidate { id: "vscode",  name: "VS Code",      command: "code",    mac_bundle_bin: Some("/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code") },
-        EditorCandidate { id: "cursor",  name: "Cursor",       command: "cursor",  mac_bundle_bin: Some("/Applications/Cursor.app/Contents/Resources/app/bin/cursor") },
-        EditorCandidate { id: "windsurf", name: "Windsurf",    command: "windsurf", mac_bundle_bin: Some("/Applications/Windsurf.app/Contents/Resources/app/bin/windsurf") },
-        EditorCandidate { id: "kiro",    name: "Kiro",         command: "kiro",    mac_bundle_bin: None },
-        EditorCandidate { id: "zed",     name: "Zed",          command: "zed",     mac_bundle_bin: Some("/Applications/Zed.app/Contents/MacOS/cli") },
-        EditorCandidate { id: "sublime", name: "Sublime Text", command: "subl",    mac_bundle_bin: Some("/Applications/Sublime Text.app/Contents/SharedSupport/bin/subl") },
-        EditorCandidate { id: "vim",     name: "Vim",          command: "vim",     mac_bundle_bin: None },
-        EditorCandidate { id: "neovim",  name: "Neovim",       command: "nvim",    mac_bundle_bin: None },
-        EditorCandidate { id: "emacs",   name: "Emacs",        command: "emacs",   mac_bundle_bin: None },
-        EditorCandidate { id: "nano",    name: "nano",         command: "nano",    mac_bundle_bin: None },
+        EditorCandidate {
+            id: "vscode",
+            name: "VS Code",
+            command: "code",
+            mac_bundle_bin: Some(
+                "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+            ),
+        },
+        EditorCandidate {
+            id: "cursor",
+            name: "Cursor",
+            command: "cursor",
+            mac_bundle_bin: Some("/Applications/Cursor.app/Contents/Resources/app/bin/cursor"),
+        },
+        EditorCandidate {
+            id: "windsurf",
+            name: "Windsurf",
+            command: "windsurf",
+            mac_bundle_bin: Some("/Applications/Windsurf.app/Contents/Resources/app/bin/windsurf"),
+        },
+        EditorCandidate {
+            id: "kiro",
+            name: "Kiro",
+            command: "kiro",
+            mac_bundle_bin: None,
+        },
+        EditorCandidate {
+            id: "zed",
+            name: "Zed",
+            command: "zed",
+            mac_bundle_bin: Some("/Applications/Zed.app/Contents/MacOS/cli"),
+        },
+        EditorCandidate {
+            id: "sublime",
+            name: "Sublime Text",
+            command: "subl",
+            mac_bundle_bin: Some("/Applications/Sublime Text.app/Contents/SharedSupport/bin/subl"),
+        },
+        EditorCandidate {
+            id: "vim",
+            name: "Vim",
+            command: "vim",
+            mac_bundle_bin: None,
+        },
+        EditorCandidate {
+            id: "neovim",
+            name: "Neovim",
+            command: "nvim",
+            mac_bundle_bin: None,
+        },
+        EditorCandidate {
+            id: "emacs",
+            name: "Emacs",
+            command: "emacs",
+            mac_bundle_bin: None,
+        },
+        EditorCandidate {
+            id: "nano",
+            name: "nano",
+            command: "nano",
+            mac_bundle_bin: None,
+        },
     ]
 }
 
@@ -73,18 +125,18 @@ fn parse_editor_command(editor: &str) -> Vec<String> {
         match ch {
             '\'' if !in_double => {
                 in_single = !in_single;
-            }
+            },
             '"' if !in_single => {
                 in_double = !in_double;
-            }
+            },
             ' ' | '\t' if !in_single && !in_double => {
                 if !current.is_empty() {
                     parts.push(std::mem::take(&mut current));
                 }
-            }
+            },
             _ => {
                 current.push(ch);
-            }
+            },
         }
     }
     if !current.is_empty() {
@@ -117,11 +169,14 @@ pub async fn open_in_editor(worktree_path: String) -> Result<String, String> {
     let editor = std::env::var("GIT_EDITOR")
         .ok()
         .or_else(|| {
-            run_git(GitAction::ReadGitConfig, &["config", "--global", "--", "core.editor"])
-                .ok()
-                .filter(|o| o.status.success())
-                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-                .filter(|s| !s.is_empty())
+            run_git(
+                GitAction::ReadGitConfig,
+                &["config", "--global", "--", "core.editor"],
+            )
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+            .filter(|s| !s.is_empty())
         })
         .or_else(|| std::env::var("VISUAL").ok())
         .or_else(|| std::env::var("EDITOR").ok())
@@ -167,7 +222,9 @@ pub fn detect_editors() -> Vec<EditorInfo> {
             EditorInfo {
                 id: editor.id.to_string(),
                 name: editor.name.to_string(),
-                command: resolved.clone().unwrap_or_else(|| editor.command.to_string()),
+                command: resolved
+                    .clone()
+                    .unwrap_or_else(|| editor.command.to_string()),
                 installed: resolved.is_some(),
             }
         })
@@ -177,8 +234,11 @@ pub fn detect_editors() -> Vec<EditorInfo> {
 #[tauri::command]
 pub fn get_git_config(key: String) -> Result<String, String> {
     let key = validate_git_config_key(&key)?;
-    let output = run_git(GitAction::ReadGitConfig, &["config", "--global", "--", &key])
-        .map_err(|e| format!("Failed to read git config: {e}"))?;
+    let output = run_git(
+        GitAction::ReadGitConfig,
+        &["config", "--global", "--", &key],
+    )
+    .map_err(|e| format!("Failed to read git config: {e}"))?;
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     } else {
@@ -202,7 +262,7 @@ pub fn set_git_config(key: String, value: String) -> Result<(), String> {
             GitAction::SetGitConfig,
             &["config", "--global", "--", &key, value.trim()],
         )
-            .map_err(|e| format!("Failed to set git config: {e}"))?;
+        .map_err(|e| format!("Failed to set git config: {e}"))?;
         if output.status.success() {
             Ok(())
         } else {

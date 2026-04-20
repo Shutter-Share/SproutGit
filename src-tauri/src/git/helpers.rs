@@ -153,7 +153,9 @@ pub fn augmented_path() -> String {
 
 pub fn validate_no_control_chars(value: &str, field_name: &str) -> Result<(), String> {
     if value.chars().any(|ch| ch.is_control()) {
-        return Err(format!("{field_name} contains unsupported control characters"));
+        return Err(format!(
+            "{field_name} contains unsupported control characters"
+        ));
     }
     Ok(())
 }
@@ -247,9 +249,14 @@ pub fn command_exists(command: &str) -> bool {
         "which"
     };
 
-    run_system_command(SystemAction::CommandLookup, lookup_program, &[command], true)
-        .map(|output| output.status.success())
-        .unwrap_or(false)
+    run_system_command(
+        SystemAction::CommandLookup,
+        lookup_program,
+        &[command],
+        true,
+    )
+    .map(|output| output.status.success())
+    .unwrap_or(false)
 }
 
 pub fn normalize_existing_path(input: &str) -> Result<PathBuf, String> {
@@ -283,7 +290,8 @@ pub fn normalize_or_create_dir(input: &str) -> Result<PathBuf, String> {
             return Err("Workspace path must be a directory".to_string());
         }
     } else {
-        fs::create_dir_all(path).map_err(|e| format!("Failed to create workspace directory: {e}"))?;
+        fs::create_dir_all(path)
+            .map_err(|e| format!("Failed to create workspace directory: {e}"))?;
     }
 
     path.canonicalize()
@@ -300,15 +308,22 @@ pub fn now_epoch_seconds() -> u64 {
 pub fn ensure_directory(path: &Path) -> Result<(), String> {
     if path.exists() {
         if !path.is_dir() {
-            return Err(format!("Expected directory but found file: {}", path.display()));
+            return Err(format!(
+                "Expected directory but found file: {}",
+                path.display()
+            ));
         }
         return Ok(());
     }
 
-    fs::create_dir_all(path).map_err(|e| format!("Failed to create directory {}: {e}", path.display()))
+    fs::create_dir_all(path)
+        .map_err(|e| format!("Failed to create directory {}: {e}", path.display()))
 }
 
-pub fn ensure_git_success(output: std::process::Output, fallback_message: &str) -> Result<std::process::Output, String> {
+pub fn ensure_git_success(
+    output: std::process::Output,
+    fallback_message: &str,
+) -> Result<std::process::Output, String> {
     if output.status.success() {
         return Ok(output);
     }
@@ -390,6 +405,7 @@ pub fn initialize_state_db(state_db_path: &Path) -> Result<(), String> {
 ///   .git_op(GitAction::Checkout, &["checkout", ...])
 ///   .execute()?
 /// ```
+#[allow(dead_code)]
 pub struct GitTransaction {
     repo_path: PathBuf,
     ops: Vec<(GitAction, Vec<String>)>,
@@ -397,6 +413,7 @@ pub struct GitTransaction {
 
 impl GitTransaction {
     /// Create a new transaction for a repository.
+    #[allow(dead_code)]
     pub fn new(repo_path: impl AsRef<Path>) -> Self {
         Self {
             repo_path: repo_path.as_ref().to_path_buf(),
@@ -405,13 +422,16 @@ impl GitTransaction {
     }
 
     /// Queue a git operation in the transaction.
+    #[allow(dead_code)]
     pub fn git_op(mut self, action: GitAction, args: &[&str]) -> Self {
-        self.ops.push((action, args.iter().map(|s| s.to_string()).collect()));
+        self.ops
+            .push((action, args.iter().map(|s| s.to_string()).collect()));
         self
     }
 
     /// Execute all queued operations sequentially.
     /// Returns immediately on first error.
+    #[allow(dead_code)]
     pub fn execute(self) -> Result<Vec<Output>, String> {
         let mut results = Vec::new();
         for (action, args) in self.ops {
@@ -428,6 +448,7 @@ impl GitTransaction {
 use std::cell::RefCell;
 
 /// Cached data with timestamp for validity checking.
+#[allow(dead_code)]
 pub struct CachedValue<T: Clone> {
     pub data: T,
     pub timestamp: u64,
@@ -435,6 +456,7 @@ pub struct CachedValue<T: Clone> {
 
 impl<T: Clone> CachedValue<T> {
     /// Check if cache is still valid based on write timestamp.
+    #[allow(dead_code)]
     pub fn is_stale(&self, last_write_ts: u64) -> bool {
         self.timestamp < last_write_ts
     }
@@ -471,7 +493,10 @@ impl GitCache {
 
 #[cfg(test)]
 mod tests {
-    use super::{validate_git_config_key, validate_non_option_value, validate_repo_url, GitAction, SystemAction};
+    use super::{
+        validate_git_config_key, validate_non_option_value, validate_repo_url, GitAction,
+        SystemAction,
+    };
 
     #[test]
     fn registered_git_actions_are_unique() {
