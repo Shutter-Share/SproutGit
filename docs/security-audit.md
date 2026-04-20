@@ -1,7 +1,7 @@
 # Security Audit: Git and System Interactions
 
 Date: 2026-04-20
-Scope: `src-tauri/src` git/system process execution paths (`git.rs`, `workspace.rs`, `diff.rs`, `editor.rs`, `helpers.rs`)
+Scope: `src-tauri/src` git/system process execution paths (`git/operations.rs`, `workspace.rs`, `git/diff.rs`, `editor.rs`, `git/helpers.rs`)
 
 ## Summary
 
