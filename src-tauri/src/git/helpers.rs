@@ -123,9 +123,12 @@ fn preferred_path_entries() -> Vec<PathBuf> {
     ]
 }
 
-/// Returns a PATH string that prepends common macOS install directories
-/// (Homebrew, /usr/local) so that GUI-launched Tauri processes find the
-/// same binaries the user's shell would.
+/// Returns a PATH string that prepends preferred Git install directories
+/// before the current PATH so GUI-launched Tauri processes find the same
+/// binaries the user's shell would. On Windows this includes common Git for
+/// Windows install locations under `Program Files` / `Program Files (x86)`,
+/// and on Unix-like systems it includes common Homebrew and `/usr/local`
+/// directories.
 pub fn augmented_path() -> String {
     let current = std::env::var_os("PATH").unwrap_or_default();
     let mut combined: Vec<PathBuf> = Vec::new();

@@ -180,8 +180,8 @@ pnpm run build          # vite build
 cd src-tauri && cargo check  # Rust check
 
 # Linting & formatting
-pnpm run lint           # ESLint (TypeScript, Svelte)
-pnpm run lint:fix       # ESLint with --fix
+pnpm run lint           # oxlint
+pnpm run lint:fix       # oxlint with autofix
 cargo clippy --all-targets -- -D warnings  # Clippy lints (in src-tauri/)
 cargo fmt --check       # Format check (in src-tauri/)
 
@@ -280,7 +280,7 @@ cargo test --lib                            # Run unit tests
 Compose multi-step git operations that execute atomically—failing on first error without partial state.
 
 ```rust
-// src-tauri/src/helpers.rs
+// src-tauri/src/git/helpers.rs
 pub struct GitTransaction {
     repo_path: PathBuf,
     ops: Vec<(GitAction, Vec<String>)>,
@@ -313,7 +313,7 @@ GitTransaction::new(&repo_path)
 Foundation for memoizing expensive read operations with write-based invalidation.
 
 ```rust
-// src-tauri/src/helpers.rs
+// src-tauri/src/git/helpers.rs
 pub struct CachedValue<T: Clone> {
     pub data: T,
     pub timestamp: u64,
