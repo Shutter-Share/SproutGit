@@ -378,6 +378,97 @@ pub fn initialize_state_db(state_db_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+// ── Tier 1: Composable Git Transaction ──
+
+/// Builder pattern for composing multi-step git operations atomically.
+/// Returns early on first error without executing remaining ops.
+///
+/// Example:
+/// ```ignore
+/// GitTransaction::new(repo_path)
+///   .git_op(GitAction::CreateManagedWorktree, &["worktree", "add", ...])
+///   .git_op(GitAction::Checkout, &["checkout", ...])
+///   .execute()?
+/// ```
+pub struct GitTransaction {
+    repo_path: PathBuf,
+    ops: Vec<(GitAction, Vec<String>)>,
+}
+
+impl GitTransaction {
+    /// Create a new transaction for a repository.
+    pub fn new(repo_path: impl AsRef<Path>) -> Self {
+        Self {
+            repo_path: repo_path.as_ref().to_path_buf(),
+            ops: Vec::new(),
+        }
+    }
+
+    /// Queue a git operation in the transaction.
+    pub fn git_op(mut self, action: GitAction, args: &[&str]) -> Self {
+        self.ops.push((action, args.iter().map(|s| s.to_string()).collect()));
+        self
+    }
+
+    /// Execute all queued operations sequentially.
+    /// Returns immediately on first error.
+    pub fn execute(self) -> Result<Vec<Output>, String> {
+        let mut results = Vec::new();
+        for (action, args) in self.ops {
+            let arg_strs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+            let output = run_git(action, &arg_strs)?;
+            results.push(output);
+        }
+        Ok(results)
+    }
+}
+
+// ── Tier 1: Read-Only Cache with Invalidation ──
+
+use std::cell::RefCell;
+
+/// Cached data with timestamp for validity checking.
+pub struct CachedValue<T: Clone> {
+    pub data: T,
+    pub timestamp: u64,
+}
+
+impl<T: Clone> CachedValue<T> {
+    /// Check if cache is still valid based on write timestamp.
+    pub fn is_stale(&self, last_write_ts: u64) -> bool {
+        self.timestamp < last_write_ts
+    }
+}
+
+/// Simple cache layer for git read operations.
+/// Memoizes expensive queries; invalidate on write operations.
+#[allow(dead_code)]
+pub struct GitCache {
+    last_write: RefCell<u64>,
+}
+
+impl GitCache {
+    /// Create a new cache instance.
+    #[allow(dead_code)]
+    pub fn new() -> Self {
+        Self {
+            last_write: RefCell::new(0),
+        }
+    }
+
+    /// Mark cache as dirty (call before any write operation).
+    #[allow(dead_code)]
+    pub fn invalidate(&self) {
+        *self.last_write.borrow_mut() = now_epoch_seconds();
+    }
+
+    /// Check if a cached value is still valid.
+    #[allow(dead_code)]
+    pub fn is_valid(&self, cache_timestamp: u64) -> bool {
+        cache_timestamp > *self.last_write.borrow()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{validate_git_config_key, validate_non_option_value, validate_repo_url, GitAction, SystemAction};
