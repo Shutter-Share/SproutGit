@@ -61,6 +61,7 @@ pub fn run() {
             hooks::update_workspace_hook,
             hooks::delete_workspace_hook,
             hooks::toggle_workspace_hook,
+            hooks::run_workspace_hook,
             github::github_device_flow_start,
             github::github_device_flow_poll,
             github::get_github_auth_status,

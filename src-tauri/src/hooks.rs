@@ -119,6 +119,7 @@ const ALLOWED_TRIGGERS: &[&str] = &[
     "after_worktree_remove",
     "before_worktree_switch",
     "after_worktree_switch",
+    "manual",
 ];
 const MAX_HOOK_OUTPUT_BYTES: usize = 64 * 1024;
 
@@ -238,6 +239,14 @@ fn normalize_workspace_path(workspace_path: &str) -> Result<PathBuf, String> {
 
     path.canonicalize()
         .map_err(|_| "Failed to resolve workspace path".to_string())
+}
+
+fn normalize_existing_dir(path_value: &str, field_name: &str) -> Result<PathBuf, String> {
+    let normalized = normalize_workspace_path(path_value)?;
+    if !normalized.is_dir() {
+        return Err(format!("{field_name} must be a directory"));
+    }
+    Ok(normalized)
 }
 
 fn truncate_utf8(input: &[u8], max_bytes: usize) -> String {
@@ -935,64 +944,28 @@ fn dependency_satisfied(
     !dep_result.critical
 }
 
-pub async fn execute_workspace_hooks_for_trigger(
-    workspace_path: &Path,
+fn to_runtime_hook(hook: WorkspaceHook) -> RuntimeHook {
+    RuntimeHook {
+        id: hook.id,
+        name: hook.name,
+        scope: hook.scope,
+        trigger: hook.trigger,
+        shell: hook.shell,
+        script: hook.script,
+        critical: hook.critical,
+        timeout_seconds: hook.timeout_seconds,
+    }
+}
+
+async fn execute_loaded_hooks(
+    conn: &sea_orm::DatabaseConnection,
     trigger: &str,
-    worktree_path: &Path,
+    worktree: &Path,
+    hooks: HashMap<String, RuntimeHook>,
+    dependency_map: HashMap<String, Vec<String>>,
+    workspace: &Path,
     app_handle: Option<&tauri::AppHandle>,
 ) -> Result<HookExecutionSummary, String> {
-    let trigger = validate_trigger(trigger)?;
-    let workspace = normalize_workspace_path(&workspace_path.to_string_lossy())?;
-    let worktree = worktree_path.to_path_buf();
-
-    let conn = connect_workspace_db(&workspace.to_string_lossy()).await?;
-
-    let hook_statement = Statement::from_sql_and_values(
-        DbBackend::Sqlite,
-        "
-        SELECT id, name, scope, trigger, shell, script, enabled, critical, timeout_seconds, created_at, updated_at
-        FROM hook_definitions
-        WHERE trigger = ? AND enabled = 1
-        ORDER BY name ASC
-        ",
-        vec![trigger.clone().into()],
-    );
-
-    let rows = conn
-        .query_all(hook_statement)
-        .await
-        .map_err(|e| format!("Failed to load hooks for trigger '{trigger}': {e}"))?;
-
-    if rows.is_empty() {
-        return Ok(HookExecutionSummary::default());
-    }
-
-    let mut hooks: HashMap<String, RuntimeHook> = HashMap::new();
-    for row in rows {
-        let hook = WorkspaceHook::from_query_result(&row, "")
-            .map_err(|e| format!("Failed to parse hook definition: {e}"))?;
-
-        hooks.insert(
-            hook.id.clone(),
-            RuntimeHook {
-                id: hook.id,
-                name: hook.name,
-                scope: hook.scope,
-                trigger: hook.trigger,
-                shell: hook.shell,
-                script: hook.script,
-                critical: hook.critical,
-                timeout_seconds: hook.timeout_seconds,
-            },
-        );
-    }
-
-    let mut dependency_map: HashMap<String, Vec<String>> = HashMap::new();
-    for hook_id in hooks.keys() {
-        let deps = load_dependencies(&conn, hook_id).await?;
-        dependency_map.insert(hook_id.clone(), deps);
-    }
-
     let mut pending = hooks;
     let mut completed: HashMap<String, RuntimeHookResult> = HashMap::new();
     let mut summary = HookExecutionSummary::default();
@@ -1038,10 +1011,10 @@ pub async fn execute_workspace_hooks_for_trigger(
                     }
 
                     insert_hook_run(
-                        &conn,
+                        conn,
                         HookRunRecord {
                             hook_id: blocked.id.clone(),
-                            trigger: trigger.clone(),
+                            trigger: trigger.to_string(),
                             worktree_path: worktree.to_string_lossy().to_string(),
                             status: "skipped".to_string(),
                             started_at: now_epoch_seconds() as i64,
@@ -1057,7 +1030,7 @@ pub async fn execute_workspace_hooks_for_trigger(
                     emit_hook_progress(
                         app_handle,
                         HookProgressEvent {
-                            trigger: trigger.clone(),
+                            trigger: trigger.to_string(),
                             hook_id: blocked.id.clone(),
                             hook_name: blocked.name.clone(),
                             phase: "skipped".to_string(),
@@ -1089,7 +1062,7 @@ pub async fn execute_workspace_hooks_for_trigger(
             emit_hook_progress(
                 app_handle,
                 HookProgressEvent {
-                    trigger: trigger.clone(),
+                    trigger: trigger.to_string(),
                     hook_id: hook.id.clone(),
                     hook_name: hook.name.clone(),
                     phase: "start".to_string(),
@@ -1100,7 +1073,7 @@ pub async fn execute_workspace_hooks_for_trigger(
                 },
             );
 
-            joins.spawn(execute_hook(hook, workspace.clone(), worktree.clone()));
+            joins.spawn(execute_hook(hook, workspace.to_path_buf(), worktree.to_path_buf()));
         }
 
         while let Some(join_result) = joins.join_next().await {
@@ -1119,10 +1092,10 @@ pub async fn execute_workspace_hooks_for_trigger(
                 }
 
                 insert_hook_run(
-                    &conn,
+                    conn,
                     HookRunRecord {
                         hook_id: hook_result.hook_id.clone(),
-                        trigger: trigger.clone(),
+                        trigger: trigger.to_string(),
                         worktree_path: worktree.to_string_lossy().to_string(),
                         status: hook_result.status.clone(),
                         started_at: now_epoch_seconds() as i64,
@@ -1138,7 +1111,7 @@ pub async fn execute_workspace_hooks_for_trigger(
                 emit_hook_progress(
                     app_handle,
                     HookProgressEvent {
-                        trigger: trigger.clone(),
+                        trigger: trigger.to_string(),
                         hook_id: hook_result.hook_id.clone(),
                         hook_name: hook_result.hook_name.clone(),
                         phase: "end".to_string(),
@@ -1155,6 +1128,113 @@ pub async fn execute_workspace_hooks_for_trigger(
     }
 
     Ok(summary)
+}
+
+async fn load_hooks_for_trigger(
+    conn: &sea_orm::DatabaseConnection,
+    trigger: &str,
+) -> Result<(HashMap<String, RuntimeHook>, HashMap<String, Vec<String>>), String> {
+    let hook_statement = Statement::from_sql_and_values(
+        DbBackend::Sqlite,
+        "
+        SELECT id, name, scope, trigger, shell, script, enabled, critical, timeout_seconds, created_at, updated_at
+        FROM hook_definitions
+        WHERE trigger = ? AND enabled = 1
+        ORDER BY name ASC
+        ",
+        vec![trigger.into()],
+    );
+
+    let rows = conn
+        .query_all(hook_statement)
+        .await
+        .map_err(|e| format!("Failed to load hooks for trigger '{trigger}': {e}"))?;
+
+    let mut hooks: HashMap<String, RuntimeHook> = HashMap::new();
+    for row in rows {
+        let hook = WorkspaceHook::from_query_result(&row, "")
+            .map_err(|e| format!("Failed to parse hook definition: {e}"))?;
+        hooks.insert(hook.id.clone(), to_runtime_hook(hook));
+    }
+
+    let mut dependency_map: HashMap<String, Vec<String>> = HashMap::new();
+    for hook_id in hooks.keys() {
+        let deps = load_dependencies(conn, hook_id).await?;
+        dependency_map.insert(hook_id.clone(), deps);
+    }
+
+    Ok((hooks, dependency_map))
+}
+
+async fn load_hook_closure(
+    conn: &sea_orm::DatabaseConnection,
+    hook_id: &str,
+) -> Result<(String, HashMap<String, RuntimeHook>, HashMap<String, Vec<String>>), String> {
+    let mut stack = vec![hook_id.to_string()];
+    let mut hooks: HashMap<String, RuntimeHook> = HashMap::new();
+    let mut dependency_map: HashMap<String, Vec<String>> = HashMap::new();
+    let mut root_trigger: Option<String> = None;
+
+    while let Some(next_hook_id) = stack.pop() {
+        if hooks.contains_key(&next_hook_id) {
+            continue;
+        }
+
+        let hook = load_hook_by_id(conn, &next_hook_id).await?;
+        if !hook.enabled {
+            return Err(format!("Hook '{}' is disabled and cannot be run", hook.name));
+        }
+
+        if let Some(existing_trigger) = &root_trigger {
+            if hook.trigger != *existing_trigger {
+                return Err(format!(
+                    "Hook '{}' uses trigger '{}', which does not match the selected hook trigger '{}'; dependencies must stay within one trigger",
+                    hook.name, hook.trigger, existing_trigger
+                ));
+            }
+        } else {
+            root_trigger = Some(hook.trigger.clone());
+        }
+
+        let deps = load_dependencies(conn, &next_hook_id).await?;
+        for dep in deps.iter().rev() {
+            stack.push(dep.clone());
+        }
+
+        dependency_map.insert(next_hook_id.clone(), deps);
+        hooks.insert(next_hook_id, to_runtime_hook(hook));
+    }
+
+    let trigger = root_trigger.ok_or_else(|| "Hook not found".to_string())?;
+    Ok((trigger, hooks, dependency_map))
+}
+
+pub async fn execute_workspace_hooks_for_trigger(
+    workspace_path: &Path,
+    trigger: &str,
+    worktree_path: &Path,
+    app_handle: Option<&tauri::AppHandle>,
+) -> Result<HookExecutionSummary, String> {
+    let trigger = validate_trigger(trigger)?;
+    let workspace = normalize_workspace_path(&workspace_path.to_string_lossy())?;
+    let worktree = worktree_path.to_path_buf();
+
+    let conn = connect_workspace_db(&workspace.to_string_lossy()).await?;
+    let (hooks, dependency_map) = load_hooks_for_trigger(&conn, &trigger).await?;
+    if hooks.is_empty() {
+        return Ok(HookExecutionSummary::default());
+    }
+
+    execute_loaded_hooks(
+        &conn,
+        &trigger,
+        &worktree,
+        hooks,
+        dependency_map,
+        &workspace,
+        app_handle,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -1437,6 +1517,50 @@ pub async fn toggle_workspace_hook(
     conn.execute(statement)
         .await
         .map_err(|e| format!("Failed to toggle workspace hook: {e}"))?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn run_workspace_hook(
+    app_handle: tauri::AppHandle,
+    workspace_path: String,
+    hook_id: String,
+    worktree_path: String,
+) -> Result<(), String> {
+    let workspace = normalize_workspace_path(&workspace_path)?;
+    let worktree = normalize_existing_dir(&worktree_path, "Worktree path")?;
+    let hook_id = normalize_non_empty(&hook_id, "Hook id")?;
+    let conn = connect_workspace_db(&workspace.to_string_lossy()).await?;
+
+    let (trigger, hooks, dependency_map) = load_hook_closure(&conn, &hook_id).await?;
+    let summary = execute_loaded_hooks(
+        &conn,
+        &trigger,
+        &worktree,
+        hooks,
+        dependency_map,
+        &workspace,
+        Some(&app_handle),
+    )
+    .await?;
+
+    if !summary.failed_critical_hooks.is_empty() || !summary.failed_non_critical_hooks.is_empty() {
+        let mut parts = Vec::new();
+        if !summary.failed_critical_hooks.is_empty() {
+            parts.push(format!(
+                "critical: {}",
+                summary.failed_critical_hooks.join(", ")
+            ));
+        }
+        if !summary.failed_non_critical_hooks.is_empty() {
+            parts.push(format!(
+                "non-critical: {}",
+                summary.failed_non_critical_hooks.join(", ")
+            ));
+        }
+        return Err(format!("Hook run completed with failures ({})", parts.join("; ")));
+    }
 
     Ok(())
 }

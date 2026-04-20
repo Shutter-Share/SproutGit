@@ -31,6 +31,7 @@
     'after_worktree_remove',
     'before_worktree_switch',
     'after_worktree_switch',
+    'manual',
   ];
 
   let loading = $state(false);
