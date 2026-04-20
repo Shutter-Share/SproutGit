@@ -85,7 +85,8 @@ export type WorkspaceHookTrigger =
   | 'before_worktree_remove'
   | 'after_worktree_remove'
   | 'before_worktree_switch'
-  | 'after_worktree_switch';
+  | 'after_worktree_switch'
+  | 'manual';
 
 export type WorkspaceHookScope = 'worktree' | 'workspace';
 
@@ -297,6 +298,12 @@ export const deleteWorkspaceHook = (workspacePath: string, hookId: string) =>
 
 export const toggleWorkspaceHook = (workspacePath: string, hookId: string, enabled: boolean) =>
   invoke<void>('toggle_workspace_hook', { workspacePath, hookId, enabled });
+
+export const runWorkspaceHook = (
+  workspacePath: string,
+  hookId: string,
+  worktreePath: string
+) => invoke<void>('run_workspace_hook', { workspacePath, hookId, worktreePath });
 
 export const openInEditor = (worktreePath: string) =>
   invoke<string>('open_in_editor', { worktreePath });

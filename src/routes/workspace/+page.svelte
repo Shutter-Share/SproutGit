@@ -23,11 +23,13 @@
     openInEditor,
     onHookProgress,
     resetWorktreeBranch,
+    runWorkspaceHook,
     type CommitEntry,
     type CommitGraphResult,
     type DiffFileEntry,
     type RefInfo,
     type HookProgressEvent,
+    type WorkspaceHook,
     type WorkspaceHookTrigger,
     type WorkspaceStatus,
     type WorktreeInfo,
@@ -37,6 +39,7 @@
   import { openPath } from "@tauri-apps/plugin-opener";
   import {
     FolderOpen,
+    Play,
     Trash2,
     SquareTerminal,
     ShieldAlert,
@@ -189,16 +192,62 @@
     operationLogs = [...operationLogs, line];
   }
 
+  function toOperationHookState(hook: Pick<WorkspaceHook, "id" | "name" | "trigger">): OperationHookState {
+    return {
+      id: hook.id,
+      name: hook.name,
+      trigger: hook.trigger,
+      status: "pending",
+      logs: [],
+    };
+  }
+
+  function sortHooksByTriggerAndName<T extends { trigger: string; name: string }>(hooks: T[]): T[] {
+    return [...hooks].sort((a, b) => {
+      if (a.trigger !== b.trigger) return a.trigger.localeCompare(b.trigger);
+      return a.name.localeCompare(b.name);
+    });
+  }
+
+  function collectHookClosure(allHooks: WorkspaceHook[], rootHookId: string): WorkspaceHook[] {
+    const hooksById = new Map(allHooks.map((hook) => [hook.id, hook]));
+    const collectedIds = new Set<string>();
+
+    function visit(hookId: string) {
+      if (collectedIds.has(hookId)) return;
+      const hook = hooksById.get(hookId);
+      if (!hook) return;
+      collectedIds.add(hookId);
+      for (const dependencyId of hook.dependencyIds) {
+        visit(dependencyId);
+      }
+    }
+
+    visit(rootHookId);
+
+    return sortHooksByTriggerAndName(
+      Array.from(collectedIds)
+        .map((hookId) => hooksById.get(hookId))
+        .filter((hook): hook is WorkspaceHook => Boolean(hook)),
+    );
+  }
+
   async function beginOperation(
     title: string,
     detail: string,
     triggers: WorkspaceHookTrigger[] = [],
+    preloadedHooks: Array<Pick<WorkspaceHook, "id" | "name" | "trigger">> = [],
   ) {
     operationStatus = { title, detail };
     operationError = null;
     activeHookName = null;
     operationLogs = [];
     operationHooks = [];
+
+    if (preloadedHooks.length > 0) {
+      operationHooks = sortHooksByTriggerAndName(preloadedHooks).map(toOperationHookState);
+      return;
+    }
 
     if (!workspace || triggers.length === 0) return;
     const workspacePath = workspace.workspacePath;
@@ -209,28 +258,17 @@
       );
 
       const seen = new Set<string>();
-      const hooks: OperationHookState[] = [];
+      const hooks: Array<Pick<WorkspaceHook, "id" | "name" | "trigger">> = [];
 
       for (const triggerHooks of hookLists) {
         for (const hook of triggerHooks) {
           if (seen.has(hook.id)) continue;
           seen.add(hook.id);
-          hooks.push({
-            id: hook.id,
-            name: hook.name,
-            trigger: hook.trigger,
-            status: "pending",
-            logs: [],
-          });
+          hooks.push({ id: hook.id, name: hook.name, trigger: hook.trigger });
         }
       }
 
-      hooks.sort((a, b) => {
-        if (a.trigger !== b.trigger) return a.trigger.localeCompare(b.trigger);
-        return a.name.localeCompare(b.name);
-      });
-
-      operationHooks = hooks;
+      operationHooks = sortHooksByTriggerAndName(hooks).map(toOperationHookState);
     } catch (err) {
       appendOperationLog(`Failed to preload hook list: ${err}`);
     }
@@ -459,6 +497,90 @@
       toast.success(`Opened in ${editor}`);
     } catch (err) {
       toast.error(String(err));
+    }
+  }
+
+  function formatHookTrigger(trigger: WorkspaceHookTrigger): string {
+    return trigger === "manual" ? "manual" : trigger.replaceAll("_", " ");
+  }
+
+  async function openRunHookMenu(wt: WorktreeInfo, anchor: HTMLElement) {
+    if (!workspace) return;
+
+    try {
+      const availableHooks = (await listWorkspaceHooks(workspace.workspacePath)).filter(
+        (hook) => hook.enabled,
+      );
+
+      if (availableHooks.length === 0) {
+        toast.info("No enabled hooks are available to run");
+        return;
+      }
+
+      const manualHooks = sortHooksByTriggerAndName(
+        availableHooks.filter((hook) => hook.trigger === "manual"),
+      );
+      const lifecycleHooks = sortHooksByTriggerAndName(
+        availableHooks.filter((hook) => hook.trigger !== "manual"),
+      );
+      const items: MenuItem[] = [];
+
+      for (const hook of manualHooks) {
+        items.push({
+          label: hook.name,
+          icon: "▶",
+          action: () => void handleRunHook(wt, hook, availableHooks),
+        });
+      }
+
+      if (manualHooks.length > 0 && lifecycleHooks.length > 0) {
+        items.push({ separator: true });
+      }
+
+      for (const hook of lifecycleHooks) {
+        items.push({
+          label: `${hook.name} (${formatHookTrigger(hook.trigger)})`,
+          icon: "▶",
+          action: () => void handleRunHook(wt, hook, availableHooks),
+        });
+      }
+
+      const rect = anchor.getBoundingClientRect();
+      worktreeContextMenu = {
+        x: Math.round(rect.right),
+        y: Math.round(rect.bottom + 6),
+        items,
+      };
+    } catch (err) {
+      toast.error(`Failed to load hooks: ${err}`);
+    }
+  }
+
+  async function handleRunHook(
+    wt: WorktreeInfo,
+    hook: WorkspaceHook,
+    availableHooks: WorkspaceHook[],
+  ) {
+    if (!workspace) return;
+
+    worktreeContextMenu = null;
+    const closureHooks = collectHookClosure(availableHooks, hook.id);
+    const label = wt.branch ?? wt.path.split("/").pop() ?? "worktree";
+
+    try {
+      await beginOperation(
+        "Running hook",
+        `Executing ${hook.name} for ${label}...`,
+        [],
+        closureHooks,
+      );
+      await runWorkspaceHook(workspace.workspacePath, hook.id, wt.path);
+      toast.success(`Ran hook: ${hook.name}`);
+    } catch (err) {
+      failOperation(String(err));
+      toast.error(String(err));
+    } finally {
+      endOperation();
     }
   }
 
@@ -830,6 +952,13 @@
                     <span class="truncate">{wt.branch ?? (wt.detached ? "detached" : "unknown")}</span>
                   </button>
                   <div class="flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100">
+                    <button
+                      onclick={(event) => openRunHookMenu(wt, event.currentTarget as HTMLElement)}
+                      class="rounded p-0.5 text-[var(--sg-text-faint)] hover:bg-[var(--sg-surface)] hover:text-[var(--sg-text)]"
+                      title="Run hook"
+                    >
+                      <Play class="h-3 w-3" />
+                    </button>
                     <button
                       onclick={() => handleOpenInEditor(wt.path)}
                       class="rounded p-0.5 text-[var(--sg-text-faint)] hover:bg-[var(--sg-surface)] hover:text-[var(--sg-text)]"

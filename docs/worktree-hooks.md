@@ -47,12 +47,16 @@ Initial trigger set:
 - `after_worktree_create`
 - `before_worktree_remove`
 - `after_worktree_remove`
+- `before_worktree_switch`
+- `after_worktree_switch`
+- `manual`
 
 Execution semantics:
 
 - `before_*` hooks can block the operation on failure (policy-controlled)
 - `after_*` hooks run after Git operation completes
 - `after_*` failures do not roll back Git operations, but are surfaced clearly
+- `manual` hooks run only when explicitly invoked from a worktree row
 
 ## SQLite Strategy (Decided)
 
@@ -220,14 +224,14 @@ Do not pass secrets by default.
 
 ## UI and Editor
 
-Add a `Hooks` section in workspace settings:
+Add a `Hooks` management surface in the workspace UI:
 
 - List hooks by trigger
 - Enable/disable toggles
 - Critical toggle
 - Timeout input
 - Dependency editor (select one or more hook dependencies)
-- Test-run action
+- Run-now action from a worktree row for enabled hooks
 - Last run status and logs
 
 Editor requirements:

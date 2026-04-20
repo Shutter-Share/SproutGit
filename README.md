@@ -6,6 +6,7 @@
 
 <p align="center">
   A fast, open-source, cross-platform Git desktop app with a <strong>worktree-first</strong> workflow.<br/>
+  Optimized for AI-driven software development.<br/>
   Built with <a href="https://v2.tauri.app">Tauri v2</a> + <a href="https://svelte.dev">SvelteKit</a> + TypeScript + Rust.
 </p>
 
@@ -33,6 +34,12 @@
 </p>
 
 ---
+
+> [!NOTE]
+> **This is an AI-driven development project.** Much of the implementation is written by LLMs under our direction.
+> We still plan architecture and execution manually, review outputs carefully, and prioritize security and strong testing standards.
+> We are experienced software engineers and treat AI as a tool, not a substitute for engineering judgment.
+> If you do not want to use or contribute to AI-driven development projects, this repository is probably not for you.
 
 > [!WARNING]
 > **SproutGit is an early prototype.** It is under active development and not ready for daily use. Expect missing features, rough edges, and breaking changes. Contributions and feedback are welcome!
@@ -81,6 +88,7 @@ Supported triggers:
 - `after_worktree_remove`
 - `before_worktree_switch`
 - `after_worktree_switch`
+- `manual`
 
 Hook capabilities:
 
@@ -91,6 +99,7 @@ Hook capabilities:
 - **Critical vs non-critical behavior**: critical failures can block downstream/operation flow
 - **Timeouts and run logs**: stdout/stderr snippets, status, and error messages are recorded for each run
 - **Live operation tracking UI**: while an operation is locked, the modal shows per-hook pending/running/complete/error status and logs
+- **Manual execution**: enabled hooks can be run on demand from each worktree row via the Run hook action
 
 ### Environment variables available to hooks
 
