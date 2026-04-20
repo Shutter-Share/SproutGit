@@ -2,7 +2,7 @@ use serde::Serialize;
 
 use crate::helpers::{
     ensure_git_success, git_command, normalize_existing_path, run_git, slugify_for_path,
-    validate_non_option_value, GitAction,
+    validate_non_option_value, GitAction, GitTransaction,
 };
 
 // ── Structs ──
@@ -455,3 +455,53 @@ pub async fn reset_worktree_branch(
 
     Ok(format!("Reset to {target} ({mode})"))
 }
+
+// ── Tier 2: Semantic High-Level Operations ──
+
+/// Create a feature worktree from a source ref with explicit branching.
+/// Convenience wrapper over create_managed_worktree for clarity.
+pub async fn create_feature_worktree(
+    root_path: String,
+    worktrees_path: String,
+    source_ref: String,
+    feature_name: String,
+) -> Result<CreateWorktreeResult, String> {
+    // Validate inputs
+    let _root = normalize_existing_path(&root_path)?;
+    let _worktrees = normalize_existing_path(&worktrees_path)?;
+    let source = validate_non_option_value(&source_ref, "Source ref")?;
+    let feature = validate_non_option_value(&feature_name, "Feature name")?;
+
+    // Use existing create_managed_worktree under the hood
+    create_managed_worktree(root_path, worktrees_path, source, feature).await
+}
+
+/// Checkout a worktree to a target ref with automatic stash.
+/// Semantic alias for clarity (what we're actually doing: switching branches).
+pub async fn switch_worktree_branch(
+    worktree_path: String,
+    target_ref: String,
+    auto_stash: bool,
+) -> Result<CheckoutResult, String> {
+    checkout_worktree(worktree_path, target_ref, auto_stash).await
+}
+
+/// Cleanup and reset a worktree to a clean state.
+/// Hard-resets the worktree and cleans untracked files.
+pub async fn reset_worktree_to_ref(
+    worktree_path: String,
+    target_ref: String,
+) -> Result<String, String> {
+    // First hard reset to the target
+    reset_worktree_branch(worktree_path.clone(), target_ref.clone(), "hard".to_string()).await?;
+
+    // Then clean untracked files
+    let wt_path = normalize_existing_path(&worktree_path)?;
+    let wt_str = wt_path.to_string_lossy();
+    let clean_output = run_git(GitAction::Reset, &["-C", &wt_str, "clean", "-fd"])?;
+    ensure_git_success(clean_output, "Failed to clean worktree")?;
+
+    Ok(format!("Worktree reset to {target_ref} and cleaned"))
+}
+
+
