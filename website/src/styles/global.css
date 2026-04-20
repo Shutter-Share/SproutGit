@@ -58,6 +58,7 @@ html {
   line-height: 1.6;
   color: var(--sg-text);
   background: var(--sg-bg);
+  scroll-behavior: smooth;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -67,10 +68,6 @@ body { margin: 0; overflow-x: hidden; }
 [data-animate] {
   opacity: 1;
   transform: none;
-}
-
-html.js {
-  scroll-behavior: smooth;
 }
 
 html.js [data-animate] {
