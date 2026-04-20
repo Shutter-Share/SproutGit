@@ -47,8 +47,11 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
             .querySelectorAll('[data-graph] .graph-path, [data-graph] .graph-node')
             .forEach((el) => el.classList.add('is-visible'));
         };
+        const prefersReducedMotion =
+          typeof window.matchMedia === 'function' &&
+          window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-        if (typeof IntersectionObserver === 'undefined') {
+        if (prefersReducedMotion || typeof IntersectionObserver === 'undefined') {
           revealAll();
         } else {
           try {
