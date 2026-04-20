@@ -202,7 +202,7 @@ The Rust backend uses a **registered action pattern** for all git and system ope
 
 **For developers building on this platform:**
 - Read [docs/architecture.md](docs/architecture.md) for detailed design assessment, reusability analysis, and recommendations for adding transaction/composition support
-- All git/system interactions route through registered helpers in `src-tauri/src/helpers.rs`
+- All git/system interactions route through registered helpers in `src-tauri/src/git/helpers.rs`
 - Security-focused unit tests run in CI across all platforms (see `pnpm run test:security`)
 
 ## Contributing
