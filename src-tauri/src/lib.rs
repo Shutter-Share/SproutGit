@@ -6,7 +6,6 @@ mod github;
 mod hooks;
 mod workspace;
 
-
 #[tauri::command]
 fn get_home_dir() -> Result<String, String> {
     let home = std::env::var("HOME")

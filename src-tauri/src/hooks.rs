@@ -12,8 +12,8 @@ use tokio::time::timeout;
 
 use crate::db::connect_workspace_db;
 use crate::git::helpers::{
-    command_exists, now_epoch_seconds, run_git, system_command, validate_no_control_chars, GitAction,
-    SystemAction,
+    command_exists, now_epoch_seconds, run_git, system_command, validate_no_control_chars,
+    GitAction, SystemAction,
 };
 
 #[derive(Serialize, FromQueryResult)]
@@ -335,10 +335,7 @@ fn load_worktree_git_context(worktree_path: &Path) -> WorktreeGitContext {
         GitAction::CurrentBranch,
         &["-C", &wt_str, "branch", "--show-current"],
     );
-    let head_full = git_capture_trimmed(
-        GitAction::RevParse,
-        &["-C", &wt_str, "rev-parse", "HEAD"],
-    );
+    let head_full = git_capture_trimmed(GitAction::RevParse, &["-C", &wt_str, "rev-parse", "HEAD"]);
     let head_short = git_capture_trimmed(
         GitAction::RevParse,
         &["-C", &wt_str, "rev-parse", "--short", "HEAD"],
@@ -807,7 +804,11 @@ async fn execute_hook(
     );
     base.env(
         "SPROUTGIT_WORKTREE_DETACHED",
-        if worktree_context.detached { "true" } else { "false" },
+        if worktree_context.detached {
+            "true"
+        } else {
+            "false"
+        },
     );
 
     base.env("SPROUTGIT_HOOK_ID", hook.id.clone());
@@ -1109,7 +1110,11 @@ async fn execute_loaded_hooks(
                 },
             );
 
-            joins.spawn(execute_hook(hook, workspace.to_path_buf(), worktree.to_path_buf()));
+            joins.spawn(execute_hook(
+                hook,
+                workspace.to_path_buf(),
+                worktree.to_path_buf(),
+            ));
         }
 
         while let Some(join_result) = joins.join_next().await {
@@ -1230,7 +1235,14 @@ async fn load_hooks_for_trigger(
 async fn load_hook_closure(
     conn: &sea_orm::DatabaseConnection,
     hook_id: &str,
-) -> Result<(String, HashMap<String, RuntimeHook>, HashMap<String, Vec<String>>), String> {
+) -> Result<
+    (
+        String,
+        HashMap<String, RuntimeHook>,
+        HashMap<String, Vec<String>>,
+    ),
+    String,
+> {
     let mut stack = vec![hook_id.to_string()];
     let mut hooks: HashMap<String, RuntimeHook> = HashMap::new();
     let mut dependency_map: HashMap<String, Vec<String>> = HashMap::new();
@@ -1243,7 +1255,10 @@ async fn load_hook_closure(
 
         let hook = load_hook_by_id(conn, &next_hook_id).await?;
         if !hook.enabled {
-            return Err(format!("Hook '{}' is disabled and cannot be run", hook.name));
+            return Err(format!(
+                "Hook '{}' is disabled and cannot be run",
+                hook.name
+            ));
         }
 
         if let Some(existing_trigger) = &root_trigger {
@@ -1625,7 +1640,10 @@ pub async fn run_workspace_hook(
                 summary.failed_non_critical_hooks.join(", ")
             ));
         }
-        return Err(format!("Hook run completed with failures ({})", parts.join("; ")));
+        return Err(format!(
+            "Hook run completed with failures ({})",
+            parts.join("; ")
+        ));
     }
 
     Ok(())
@@ -1703,7 +1721,7 @@ mod tests {
             &dependency_ids,
             &dependency_triggers,
         ) {
-            Ok(_) => {}
+            Ok(_) => {},
             Err(err) => panic!("manual dependency should be allowed: {err}"),
         }
     }
