@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
+use std::process::{Output, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::AsyncReadExt;
 use tokio::process::Command as TokioCommand;
@@ -12,7 +12,8 @@ use tokio::time::timeout;
 
 use crate::db::connect_workspace_db;
 use crate::git::helpers::{
-    now_epoch_seconds, system_command, validate_no_control_chars, SystemAction,
+    now_epoch_seconds, run_git, system_command, validate_no_control_chars, GitAction,
+    SystemAction,
 };
 
 #[derive(Serialize, FromQueryResult)]
@@ -230,6 +231,83 @@ fn truncate_utf8(input: &[u8], max_bytes: usize) -> String {
         return text;
     }
     text.chars().take(max_bytes).collect()
+}
+
+fn git_output_trimmed(output: Output) -> Option<String> {
+    if !output.status.success() {
+        return None;
+    }
+
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+fn git_capture_trimmed(action: GitAction, args: &[&str]) -> Option<String> {
+    run_git(action, args).ok().and_then(git_output_trimmed)
+}
+
+fn trigger_parts(trigger: &str) -> (String, String) {
+    let phase = if trigger.starts_with("before_") {
+        "before"
+    } else if trigger.starts_with("after_") {
+        "after"
+    } else {
+        "unknown"
+    };
+
+    let action = if trigger.ends_with("_create") {
+        "create"
+    } else if trigger.ends_with("_remove") {
+        "remove"
+    } else if trigger.ends_with("_switch") {
+        "switch"
+    } else {
+        "unknown"
+    };
+
+    (phase.to_string(), action.to_string())
+}
+
+fn path_tail(path: &Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+struct WorktreeGitContext {
+    branch_name: Option<String>,
+    head_full: Option<String>,
+    head_short: Option<String>,
+    detached: bool,
+}
+
+fn load_worktree_git_context(worktree_path: &Path) -> WorktreeGitContext {
+    let wt_str = worktree_path.to_string_lossy().to_string();
+
+    let branch_name = git_capture_trimmed(
+        GitAction::CurrentBranch,
+        &["-C", &wt_str, "branch", "--show-current"],
+    );
+    let head_full = git_capture_trimmed(
+        GitAction::CurrentBranch,
+        &["-C", &wt_str, "rev-parse", "HEAD"],
+    );
+    let head_short = git_capture_trimmed(
+        GitAction::CurrentBranch,
+        &["-C", &wt_str, "rev-parse", "--short", "HEAD"],
+    );
+
+    WorktreeGitContext {
+        detached: branch_name.is_none(),
+        branch_name,
+        head_full,
+        head_short,
+    }
 }
 
 async fn load_dependencies(
@@ -519,7 +597,13 @@ async fn execute_hook(
 
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
     let mut base = system_command(SystemAction::HookExecute, &program, &arg_refs);
+    let (trigger_phase, trigger_action) = trigger_parts(&hook.trigger);
+    let workspace_name = path_tail(&workspace_path);
+    let worktree_name = path_tail(&worktree_path);
+    let worktree_context = load_worktree_git_context(&worktree_path);
+
     base.env("SPROUTGIT_WORKSPACE_PATH", workspace_path.to_string_lossy().to_string());
+    base.env("SPROUTGIT_WORKSPACE_NAME", workspace_name);
     base.env("SPROUTGIT_ROOT_PATH", root_path.to_string_lossy().to_string());
     base.env(
         "SPROUTGIT_WORKTREES_PATH",
@@ -529,7 +613,39 @@ async fn execute_hook(
         "SPROUTGIT_WORKTREE_PATH",
         worktree_path.to_string_lossy().to_string(),
     );
+    base.env("SPROUTGIT_WORKTREE_NAME", worktree_name);
+    base.env(
+        "SPROUTGIT_WORKTREE_BRANCH",
+        worktree_context.branch_name.unwrap_or_default(),
+    );
+    base.env(
+        "SPROUTGIT_WORKTREE_HEAD",
+        worktree_context.head_full.unwrap_or_default(),
+    );
+    base.env(
+        "SPROUTGIT_WORKTREE_HEAD_SHORT",
+        worktree_context.head_short.unwrap_or_default(),
+    );
+    base.env(
+        "SPROUTGIT_WORKTREE_DETACHED",
+        if worktree_context.detached { "true" } else { "false" },
+    );
+
+    base.env("SPROUTGIT_HOOK_ID", hook.id.clone());
+    base.env("SPROUTGIT_HOOK_NAME", hook.name.clone());
+    base.env("SPROUTGIT_HOOK_SHELL", hook.shell.clone());
+    base.env(
+        "SPROUTGIT_HOOK_CRITICAL",
+        if hook.critical { "true" } else { "false" },
+    );
+    base.env(
+        "SPROUTGIT_HOOK_TIMEOUT_SECONDS",
+        hook.timeout_seconds.to_string(),
+    );
+
     base.env("SPROUTGIT_TRIGGER", hook.trigger.clone());
+    base.env("SPROUTGIT_TRIGGER_PHASE", trigger_phase);
+    base.env("SPROUTGIT_TRIGGER_ACTION", trigger_action);
     base.env("SPROUTGIT_OS", current_os_label());
 
     let mut command = TokioCommand::from(base);

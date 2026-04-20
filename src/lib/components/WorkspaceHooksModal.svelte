@@ -43,7 +43,49 @@
   let detectedShell = $state<WorkspaceHookShell>('bash');
   let detectedShellLabel = $state('Linux (bash)');
 
-  const defaultScript = () => `# Example: run project setup for this worktree\n# You can use SPROUTGIT_WORKTREE_PATH and SPROUTGIT_TRIGGER\n# pnpm install\n# pnpm run db:migrate`;
+  const hookVariableGroups = [
+    {
+      title: 'Workspace',
+      items: [
+        { name: 'SPROUTGIT_WORKSPACE_PATH', description: 'Absolute path to the SproutGit workspace.' },
+        { name: 'SPROUTGIT_WORKSPACE_NAME', description: 'Workspace directory name.' },
+        { name: 'SPROUTGIT_ROOT_PATH', description: 'Absolute path to the protected root checkout.' },
+        { name: 'SPROUTGIT_WORKTREES_PATH', description: 'Absolute path to the managed worktrees directory.' },
+      ],
+    },
+    {
+      title: 'Worktree',
+      items: [
+        { name: 'SPROUTGIT_WORKTREE_PATH', description: 'Absolute path to the target worktree.' },
+        { name: 'SPROUTGIT_WORKTREE_NAME', description: 'Target worktree directory name.' },
+        { name: 'SPROUTGIT_WORKTREE_BRANCH', description: 'Current branch name, if attached.' },
+        { name: 'SPROUTGIT_WORKTREE_HEAD', description: 'Full HEAD commit hash.' },
+        { name: 'SPROUTGIT_WORKTREE_HEAD_SHORT', description: 'Short HEAD commit hash.' },
+        { name: 'SPROUTGIT_WORKTREE_DETACHED', description: 'true when the worktree is in detached HEAD state.' },
+      ],
+    },
+    {
+      title: 'Trigger',
+      items: [
+        { name: 'SPROUTGIT_TRIGGER', description: 'Full trigger name, such as before_worktree_create.' },
+        { name: 'SPROUTGIT_TRIGGER_PHASE', description: 'before or after.' },
+        { name: 'SPROUTGIT_TRIGGER_ACTION', description: 'create, remove, or switch.' },
+        { name: 'SPROUTGIT_OS', description: 'Current OS label: macos, linux, or windows.' },
+      ],
+    },
+    {
+      title: 'Hook',
+      items: [
+        { name: 'SPROUTGIT_HOOK_ID', description: 'Stable ID of the current hook.' },
+        { name: 'SPROUTGIT_HOOK_NAME', description: 'Human-readable hook name.' },
+        { name: 'SPROUTGIT_HOOK_SHELL', description: 'Shell used to execute the script.' },
+        { name: 'SPROUTGIT_HOOK_CRITICAL', description: 'true when the hook is marked critical.' },
+        { name: 'SPROUTGIT_HOOK_TIMEOUT_SECONDS', description: 'Configured timeout for this hook run.' },
+      ],
+    },
+  ] as const;
+
+  const defaultScript = () => `# Example: run project setup for this worktree\n# Workspace: $SPROUTGIT_WORKSPACE_NAME\n# Worktree: $SPROUTGIT_WORKTREE_PATH\n# Branch: $SPROUTGIT_WORKTREE_BRANCH\n# Trigger: $SPROUTGIT_TRIGGER\n# pnpm install\n# pnpm run db:migrate`;
 
   let form = $state<HookUpsertInput>({
     name: '',
@@ -470,6 +512,35 @@
                 form = { ...form, script: next };
               }}
             />
+            <div class="mt-3 rounded-lg border border-[var(--sg-border-subtle)] bg-[var(--sg-surface-raised)] p-3">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <p class="text-xs font-medium text-[var(--sg-text)]">Available runtime variables</p>
+                  <p class="mt-0.5 text-[10px] text-[var(--sg-text-faint)]">
+                    These are injected into every hook process so scripts can adapt to the current workspace, worktree, trigger, and hook metadata.
+                  </p>
+                </div>
+                <span class="rounded border border-[var(--sg-border)] bg-[var(--sg-surface)] px-2 py-0.5 text-[10px] text-[var(--sg-text-faint)]">
+                  {detectedShell === 'pwsh' ? '$env:NAME' : '$NAME'}
+                </span>
+              </div>
+
+              <div class="mt-3 grid gap-3 md:grid-cols-2">
+                {#each hookVariableGroups as group}
+                  <div class="rounded border border-[var(--sg-border)] bg-[var(--sg-surface)] p-2.5">
+                    <p class="text-[10px] font-semibold uppercase tracking-wider text-[var(--sg-text-faint)]">{group.title}</p>
+                    <div class="mt-2 space-y-2">
+                      {#each group.items as item}
+                        <div>
+                          <p class="font-mono text-[10px] text-[var(--sg-text)]">{item.name}</p>
+                          <p class="mt-0.5 text-[10px] leading-relaxed text-[var(--sg-text-dim)]">{item.description}</p>
+                        </div>
+                      {/each}
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            </div>
           </div>
         </div>
       </div>
