@@ -179,12 +179,42 @@ pnpm run check          # svelte-check
 pnpm run build          # vite build
 cd src-tauri && cargo check  # Rust check
 
+# Linting & formatting
+pnpm run lint           # ESLint (TypeScript, Svelte)
+pnpm run lint:fix       # ESLint with --fix
+cargo clippy --all-targets -- -D warnings  # Clippy lints (in src-tauri/)
+cargo fmt --check       # Format check (in src-tauri/)
+
+# Auto-format code
+pnpm run format         # Prettier (frontend)
+cargo fmt               # rustfmt (backend)
+
+# Run security tests
+pnpm run test:security  # Rust security unit tests
+
 # Run in development
 pnpm run tauri dev
 
 # VS Code task (with nvm support)
 # Defined as: zsh -lc 'source ~/.nvm/nvm.sh && npm run tauri dev'
 ```
+
+## Linting & Code Quality
+
+**Rust:**
+- **Clippy** — Configured in `src-tauri/Cargo.toml` with `[lints]` section. Enforces security, correctness, complexity checks.
+- **rustfmt** — Configuration in `rustfmt.toml`. Max width 100 chars, consistent style.
+- **Convenience alias** — `cd src-tauri && cargo lint` runs clippy with `-D warnings`.
+
+**Frontend (TypeScript + Svelte):**
+- **oxlint** — Fast Rust-based linter configured in `.oxlintrc.json`. Checks security, best practices, unused variables.
+- **Prettier** — Configured in `.prettierrc`. Print width 100, 2-space tabs, single quotes, Svelte support via plugin.
+- **Before commit** — Run `pnpm run lint:fix && pnpm run format` to auto-fix issues.
+
+**CI Integration:**
+- All linters run in GitHub Actions on every push (see `.github/workflows/`)
+- Linting failures block PR merge
+- Format violations reported as annotations on PR
 
 ## Coding Conventions
 
@@ -215,6 +245,33 @@ When adding or changing **any** git or system interaction, follow all rules belo
 - Add/maintain unit tests for input validation and command registration invariants.
 - Run security-focused tests before committing.
 - CI must execute these tests on all supported OS targets.
+
+## Code Quality Checklist (Before Committing)
+
+Always run the following before pushing code:
+
+**Frontend:**
+```bash
+pnpm run lint      # Check code with oxlint (fast, Rust-based)
+pnpm run lint:fix  # Auto-fix linting issues
+pnpm run format    # Format code with Prettier
+pnpm run check     # TypeScript type check
+```
+
+**Backend:**
+```bash
+cd src-tauri
+cargo clippy --all-targets -- -D warnings  # Check for issues
+cargo fmt --check                           # Check formatting
+cargo test --lib                            # Run unit tests
+```
+
+**Commit only when:**
+- ✅ `pnpm run lint` returns 0 warnings, 0 errors
+- ✅ `pnpm run check` passes (0 TypeScript errors)
+- ✅ `cargo clippy` passes (0 warnings with `-D warnings`)
+- ✅ `cargo test --lib` passes (all tests)
+- ✅ Code is formatted (`cargo fmt` and `pnpm run format`)
 
 ## Composability & Platform Extensibility
 
