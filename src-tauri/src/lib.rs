@@ -1,6 +1,9 @@
+mod config;
+mod db;
 mod editor;
 mod git;
 mod github;
+mod hooks;
 mod workspace;
 
 
@@ -46,7 +49,18 @@ pub fn run() {
             editor::get_git_config,
             editor::set_git_config,
             workspace::create_sproutgit_workspace,
+            workspace::import_git_repo_workspace,
             workspace::inspect_sproutgit_workspace,
+            config::list_recent_workspaces,
+            config::touch_recent_workspace,
+            config::remove_recent_workspace,
+            config::get_app_setting,
+            config::set_app_setting,
+            hooks::list_workspace_hooks,
+            hooks::create_workspace_hook,
+            hooks::update_workspace_hook,
+            hooks::delete_workspace_hook,
+            hooks::toggle_workspace_hook,
             github::github_device_flow_start,
             github::github_device_flow_poll,
             github::get_github_auth_status,

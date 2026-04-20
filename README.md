@@ -19,13 +19,13 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/liamcottle/sproutgit/actions/workflows/ci.yml">
-    <img src="https://github.com/liamcottle/sproutgit/actions/workflows/ci.yml/badge.svg" alt="CI Status" />
+  <a href="https://github.com/Shutter-Share/SproutGit/actions/workflows/ci.yml">
+    <img src="https://github.com/Shutter-Share/SproutGit/actions/workflows/ci.yml/badge.svg" alt="CI Status" />
   </a>
-  <a href="https://codecov.io/gh/liamcottle/sproutgit">
-    <img src="https://codecov.io/gh/liamcottle/sproutgit/graph/badge.svg" alt="Code Coverage" />
+  <a href="https://codecov.io/gh/Shutter-Share/SproutGit">
+    <img src="https://codecov.io/gh/Shutter-Share/SproutGit/graph/badge.svg" alt="Code Coverage" />
   </a>
-  <a href="https://github.com/liamcottle/sproutgit/blob/main/LICENSE">
+  <a href="https://github.com/Shutter-Share/SproutGit/blob/main/LICENSE">
     <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" />
   </a>
   <img src="https://img.shields.io/badge/status-early%20prototype-red.svg" alt="Status: Early Prototype" />
@@ -63,10 +63,56 @@ No conflicts, no stash juggling, no waiting. Each agent works independently on i
 - **Interactive commit graph** — Lane-based SVG graph with search, selection, and context menus
 - **Diff viewer** — Single-commit and multi-commit range diffs with file list and unified diff display
 - **Branch management** — Checkout, reset (soft/mixed/hard), and create branches from any ref
+- **Workspace hooks** — Run before/after create, remove, and switch operations with dependency ordering, parallel groups, and per-hook output
 - **Editor integration** — Open worktrees in your configured editor (respects `GIT_EDITOR`, `core.editor`, `VISUAL`, `EDITOR`)
 - **Dark mode** — Automatic light/dark theme via system preferences
 - **Cross-platform** — macOS, Windows, and Linux via Tauri v2
 - **Lightweight** — Small bundle, native performance, minimal resource usage
+
+## Workspace Hooks
+
+SproutGit supports workspace-scoped lifecycle hooks stored in `.sproutgit/state.db`.
+
+Supported triggers:
+
+- `before_worktree_create`
+- `after_worktree_create`
+- `before_worktree_remove`
+- `after_worktree_remove`
+- `before_worktree_switch`
+- `after_worktree_switch`
+
+Hook capabilities:
+
+- **Cross-platform shell support**: `zsh` on macOS, `bash` on Linux, `pwsh` on Windows
+- **Dependency graph**: hooks can depend on other hooks by ID
+- **Parallel execution**: hooks in a named parallel group can run concurrently when dependencies are satisfied
+- **Critical vs non-critical behavior**: critical failures can block downstream/operation flow
+- **Timeouts and run logs**: stdout/stderr snippets, status, and error messages are recorded for each run
+- **Live operation tracking UI**: while an operation is locked, the modal shows per-hook pending/running/complete/error status and logs
+
+### Environment variables available to hooks
+
+SproutGit injects runtime context for each hook process:
+
+- `SPROUTGIT_WORKSPACE_PATH`
+- `SPROUTGIT_ROOT_PATH`
+- `SPROUTGIT_WORKTREES_PATH`
+- `SPROUTGIT_WORKTREE_PATH`
+- `SPROUTGIT_TRIGGER`
+- `SPROUTGIT_OS`
+
+## Is This Native Git?
+
+Not in this form. Git has native **hook scripts** (for example `pre-commit`, `post-checkout`, `post-merge`) and native **worktree** commands, but it does not provide:
+
+- a workspace-level hook registry in SQLite
+- dependency and parallel-group orchestration
+- critical/non-critical policy controls per hook
+- a GUI for lifecycle hooks tied to managed worktree operations
+- live per-hook progress/status/log rendering in a desktop app
+
+SproutGit builds this orchestration layer on top of native Git primitives so worktree automation is predictable, cross-platform, and visible to users.
 
 ## Screenshots
 

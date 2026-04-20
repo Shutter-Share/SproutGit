@@ -544,5 +544,6 @@ The `Spinner.svelte` component supports:
 - `git clone --progress` writes to **stderr**, not stdout
 - Tauri event emission requires `tauri::Emitter` trait in scope
 - `format!()` in Rust: don't mix string concatenation with format placeholders — use `.join()` for building git format strings
+- SQLite + SeaORM (`sqlx-sqlite`) integer decode: avoid `u64` in `FromQueryResult` structs; use `i64` for `INTEGER` columns (timestamps included)
 - Svelte 5 `class:` directive with Tailwind arbitrary values (e.g., `class:bg-[var(--x)]/10={cond}`) works but looks odd
 - Window overflow: parent containers must be `flex flex-col overflow-hidden` for child `flex-1 overflow-auto` to scroll properly
