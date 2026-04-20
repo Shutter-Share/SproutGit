@@ -281,7 +281,7 @@
 {:else}
 <main class="flex h-screen flex-col">
   <!-- Title bar area -->
-  <header data-tauri-drag-region class="flex shrink-0 items-center justify-between border-b border-[var(--sg-border)] bg-[var(--sg-surface)] pt-1 pr-1 pb-1 pl-[76px]">
+  <header data-tauri-drag-region class="flex shrink-0 items-center justify-between border-b border-[var(--sg-border)] bg-[var(--sg-surface)] pt-1 pr-1 pb-1 pl-[var(--sg-titlebar-inset)]">
     <span class="flex items-center gap-1.5 text-sm font-semibold text-[var(--sg-text)]">
       <img src="/logo.svg" alt="" class="h-5 w-5" />
       SproutGit
