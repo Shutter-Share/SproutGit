@@ -12,6 +12,7 @@
 
 <p align="center">
   <a href="#features">Features</a> •
+  <a href="#workflow-policy">Workflow Policy</a> •
   <a href="#screenshots">Screenshots</a> •
   <a href="#installation">Installation</a> •
   <a href="#development">Development</a> •
@@ -42,7 +43,7 @@
 > If you do not want to use or contribute to AI-driven development projects, this repository is probably not for you.
 
 > [!WARNING]
-> **SproutGit is an early prototype.** It is under active development and not ready for daily use. Expect missing features, rough edges, and breaking changes. Contributions and feedback are welcome!
+> **SproutGit is an early prototype.** It is under active development and not ready for regular use. Expect missing features, rough edges, and breaking changes. Contributions and feedback are welcome!
 
 ## Why worktree-first?
 
@@ -75,6 +76,11 @@ No conflicts, no stash juggling, no waiting. Each agent works independently on i
 - **Dark mode** — Automatic light/dark theme via system preferences
 - **Cross-platform** — macOS, Windows, and Linux via Tauri v2
 - **Lightweight** — Small bundle, native performance, minimal resource usage
+
+## Workflow Policy
+
+- Branch/worktree binding and lifecycle rules: [docs/branch-worktree-policy.md](docs/branch-worktree-policy.md)
+- Workspace hook model and trigger behavior: [docs/worktree-hooks.md](docs/worktree-hooks.md)
 
 ## Workspace Hooks
 
@@ -274,6 +280,7 @@ The Rust backend uses a **registered action pattern** for all git and system ope
 **For developers building on this platform:**
 
 - Read [docs/architecture.md](docs/architecture.md) for detailed design assessment, reusability analysis, and recommendations for adding transaction/composition support
+- Read [docs/branch-worktree-policy.md](docs/branch-worktree-policy.md) for branch/worktree lifecycle defaults and cleanup safety rules
 - All git/system interactions route through registered helpers in `src-tauri/src/git/helpers.rs`
 - Security-focused unit tests run in CI across all platforms (see `pnpm run test:security`)
 

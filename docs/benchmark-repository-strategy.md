@@ -72,7 +72,7 @@ Maintain generator scripts and regenerate benchmark repositories regularly.
 
 Suggested cadence:
 
-- Monthly regeneration
+- Regeneration at a recurring cadence defined by maintainers
 - Additional regeneration at major release milestones
 
 ### Snapshot Stability
@@ -81,8 +81,8 @@ Publish versioned snapshot tags from generated repositories.
 
 Suggested naming:
 
-- benchmark-vYYYY-MM
-- benchmark-vYYYY-MM-patchN
+- benchmark-vN
+- benchmark-vN-patchN
 
 Usage:
 
@@ -152,30 +152,30 @@ Mitigation: enforce pinned snapshot plus canonical capture runbook.
 
 ## Success Criteria
 1. Screenshot and video capture remains reproducible across releases.
-2. Benchmark datasets are refreshed on schedule without manual churn.
+2. Benchmark datasets are refreshed via defined regeneration triggers without manual churn.
 3. Regressions are detected in generated benchmarks before release.
 4. Canary lane reveals real-world drift without destabilizing release cadence.
 
-## 60-Day Rollout Plan
-### Phase 1 (Weeks 1-2)
+## Rollout Plan
+### Phase 1
 
 - Define scenario modules and deterministic generation inputs
 - Define snapshot naming and retention policy
 - Draft media capture runbook
 
-### Phase 2 (Weeks 3-4)
+### Phase 2
 
 - Generate initial benchmark set
 - Publish first pinned snapshot tags
 - Validate core flows for screenshots and QA
 
-### Phase 3 (Weeks 5-6)
+### Phase 3
 
 - Add canary repository lane with non-blocking reporting
 - Compare canary findings against generated scenarios
 - Adjust scenario modules where coverage is weak
 
-### Phase 4 (Weeks 7-8)
+### Phase 4
 
 - Finalize benchmark governance and maintenance cadence
 - Integrate into release checklist

@@ -1,6 +1,6 @@
 # Worktree Lifecycle Hooks (Proposed)
 
-Date: 2026-04-20
+Revision: Initial draft
 Status: Proposed
 Owner: SproutGit core
 

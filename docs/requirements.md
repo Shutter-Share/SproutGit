@@ -16,7 +16,7 @@ This is a cascade where branch belongs to worktree, and worktree belongs to repo
 SproutGit enforces a project workspace structure above Git root/worktrees:
 
 - Project workspace root: <project_workspace>
-- Main checkout (Git primary worktree): <project_workspace>/root/
+- Main checkout (Git primary worktree, protected internal checkout): <project_workspace>/root/
 - Managed worktrees container: <project_workspace>/worktrees/
 - Individual managed worktree path: <project_workspace>/worktrees/<branch_slug>
 - SproutGit project metadata: <project_workspace>/.sproutgit/
@@ -32,15 +32,17 @@ Rules:
 
 1. New managed worktrees must be created under <project_workspace>/worktrees/.
 2. The primary Git checkout must live at <project_workspace>/root/.
-3. SproutGit labels each worktree as:
+3. The primary checkout at <project_workspace>/root/ is a protected internal checkout and should not be the default location for day-to-day feature work.
+4. Long-lived branches such as `main`, `master`, `develop`, and `release/*` should use dedicated worktrees for normal editing when the product exposes that workflow.
+5. SproutGit labels each worktree as:
    - Managed: path under <project_workspace>/worktrees/
    - External: path outside the managed container
-4. Default action for branch creation is "Create branch + worktree".
-5. Worktree switcher prioritizes managed worktrees first.
-6. Deleting a managed worktree prunes both Git metadata and its folder.
-7. Presence of <project_workspace>/.sproutgit/project.json identifies the filesystem as a SproutGit project.
-8. SQLite state.db stores workspace-local state, not Git object data.
-9. Global app settings and recent-workspace state must be stored in the user-profile config SQLite database.
+6. Default action for branch creation is "Create branch + worktree".
+7. Worktree switcher prioritizes managed worktrees first.
+8. Deleting a managed worktree prunes both Git metadata and its folder.
+9. Presence of <project_workspace>/.sproutgit/project.json identifies the filesystem as a SproutGit project.
+10. SQLite state.db stores workspace-local state, not Git object data.
+11. Global app settings and recent-workspace state must be stored in the user-profile config SQLite database.
 
 ## MVP Scope
 
@@ -77,6 +79,7 @@ Rules:
    - Create managed worktree from branch
    - Switch active worktree quickly
    - Prune/remove worktree safely
+   - Keep the protected `root/` checkout distinct from normal day-to-day worktrees
 4. Branch plus worktree workflow
    - Default action: create branch + create managed worktree
    - Branch list and create from selected base
@@ -115,7 +118,7 @@ Rules:
 
 ## MVP Done Criteria
 
-1. A user can complete daily feature-branch flow without terminal fallback:
+1. A user can complete the standard feature-branch flow without terminal fallback:
    - Open repo -> create branch+worktree -> make and stage changes -> commit -> push
 2. The UI always shows unambiguous current Repo > Worktree > Branch context.
 3. Managed workspace convention (<project_workspace>/root + /worktrees) is enforced by default and visible in creation flows.
