@@ -209,7 +209,7 @@ This becomes a **SvelteKit layout** at `src/routes/workspace/+layout.svelte`. It
 
 ---
 
-## [4] Main Workspace (daily driver)
+## [4] Main Workspace (primary workflow)
 
 **When shown:** After a workspace is open and at least one managed worktree exists.
 

@@ -197,7 +197,7 @@ Proposed ownership:
 Maintenance cadence:
 
 - Continuous updates with feature PRs
-- Monthly docs quality sweep (dead links, stale screenshots, drift checks)
+- Recurring docs quality sweep (dead links, stale screenshots, drift checks)
 
 ## Risks and Mitigations
 Risk: docs drift from product behavior.

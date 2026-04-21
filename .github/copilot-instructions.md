@@ -49,10 +49,22 @@ sproutgit/
 │   ├── Cargo.toml                # Rust deps: tauri, rusqlite, serde, tauri-plugin-dialog
 │   └── capabilities/default.json # Permissions: core, opener, dialog
 ├── docs/
+│   ├── index.md                  # Documentation index; read first to discover relevant docs for a task
 │   ├── requirements.md           # Full MVP requirements with P0/P1 features
 │   └── design-review-and-screen-plan.md  # Screen architecture (8 screens planned)
 └── package.json                  # pnpm scripts: dev, build, check, tauri
 ```
+
+## Documentation Index (Required)
+
+The `docs/` folder contains product, architecture, security, and workflow decisions that may be directly relevant to implementation work.
+
+Agent requirements:
+
+- At the start of each new task, read `docs/index.md` first to discover whether any repository docs are relevant.
+- If a linked doc is relevant to the task, read it before making design or implementation decisions.
+- When adding, renaming, removing, or substantially repurposing a document in `docs/`, update `docs/index.md` in the same change.
+- Treat `docs/index.md` as the maintained entry point for the repository documentation set.
 
 ## Workspace Layout (User Projects)
 
