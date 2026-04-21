@@ -510,7 +510,7 @@
   }
 
   function refBadgeClass(ref: string): string {
-    if (ref.startsWith("tag:")) return "bg-[#f9e2af]/20 text-[#f9e2af]";
+    if (ref.startsWith("tag:")) return "bg-[var(--sg-warning)]/20 text-[var(--sg-warning)]";
     if (ref === "HEAD") return "bg-[var(--sg-danger)]/20 text-[var(--sg-danger)]";
     if (worktreeBranches.has(ref)) return "bg-[var(--sg-accent)]/20 text-[var(--sg-accent)]";
     return "bg-[var(--sg-primary)]/20 text-[var(--sg-primary)]";

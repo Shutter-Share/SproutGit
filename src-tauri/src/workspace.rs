@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::VecDeque;
 use std::fs;
@@ -111,6 +111,179 @@ pub struct WorkspaceStatus {
     pub worktrees_exists: bool,
     pub metadata_exists: bool,
     pub state_db_exists: bool,
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ImportRepoMode {
+    InPlace,
+    Move,
+    Copy,
+}
+
+fn finalize_workspace(
+    workspace: &std::path::Path,
+    root_path: &std::path::Path,
+    worktrees_path: &std::path::Path,
+    metadata_path: &std::path::Path,
+    state_db_path: &std::path::Path,
+    cloned: bool,
+) -> Result<WorkspaceInitResult, String> {
+    let project_marker_path = metadata_path.join("project.json");
+
+    if !project_marker_path.exists() {
+        write_project_marker(
+            &project_marker_path,
+            workspace,
+            root_path,
+            worktrees_path,
+            state_db_path,
+        )?;
+    }
+
+    Ok(WorkspaceInitResult {
+        workspace_path: workspace.to_string_lossy().to_string(),
+        root_path: root_path.to_string_lossy().to_string(),
+        worktrees_path: worktrees_path.to_string_lossy().to_string(),
+        metadata_path: metadata_path.to_string_lossy().to_string(),
+        state_db_path: state_db_path.to_string_lossy().to_string(),
+        cloned,
+    })
+}
+
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
+    ensure_directory(dst)?;
+
+    for entry in fs::read_dir(src).map_err(|e| format!("Failed to read source directory: {e}"))? {
+        let entry = entry.map_err(|e| format!("Failed to read source entry: {e}"))?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        let ft = entry
+            .file_type()
+            .map_err(|e| format!("Failed to read file type: {e}"))?;
+
+        if ft.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else if ft.is_file() {
+            fs::copy(&src_path, &dst_path)
+                .map_err(|e| format!("Failed to copy file '{}': {e}", src_path.display()))?;
+        } else if ft.is_symlink() {
+            return Err(format!(
+                "Import does not support symbolic links: {}",
+                src_path.display()
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn import_repo_with_mode(
+    workspace: &std::path::Path,
+    source_repo: &std::path::Path,
+    mode: ImportRepoMode,
+) -> Result<(), String> {
+    let root_path = workspace.join("root");
+    let worktrees_path = workspace.join("worktrees");
+    let metadata_path = workspace.join(".sproutgit");
+
+    ensure_directory(&root_path)?;
+    ensure_directory(&worktrees_path)?;
+    ensure_directory(&metadata_path)?;
+
+    let root_has_content = fs::read_dir(&root_path)
+        .map_err(|e| format!("Failed to inspect root directory: {e}"))?
+        .next()
+        .is_some();
+
+    if root_has_content {
+        return Err("Cannot import into root/: directory is not empty".to_string());
+    }
+
+    match mode {
+        ImportRepoMode::Copy => {
+            let source_repo_string = source_repo.to_string_lossy().to_string();
+            let root_path_string = root_path.to_string_lossy().to_string();
+            let clone_output = git_command(
+                GitAction::Clone,
+                &[
+                    "clone",
+                    "--no-hardlinks",
+                    "--",
+                    &source_repo_string,
+                    &root_path_string,
+                ],
+            )
+            .output()
+            .map_err(|e| format!("Failed to import repository: {e}"))?;
+
+            if !clone_output.status.success() {
+                let stderr = String::from_utf8_lossy(&clone_output.stderr)
+                    .trim()
+                    .to_string();
+                return Err(if stderr.is_empty() {
+                    "Failed to import repository".to_string()
+                } else {
+                    stderr
+                });
+            }
+        },
+        ImportRepoMode::Move => {
+            fs::remove_dir(&root_path)
+                .map_err(|e| format!("Failed to prepare root directory for move import: {e}"))?;
+
+            match fs::rename(source_repo, &root_path) {
+                Ok(_) => {},
+                Err(_) => {
+                    copy_dir_recursive(source_repo, &root_path)?;
+                    fs::remove_dir_all(source_repo).map_err(|e| {
+                        format!("Failed to remove source repository after copy fallback: {e}")
+                    })?;
+                },
+            }
+        },
+        ImportRepoMode::InPlace => {
+            let reserved = ["root", "worktrees", ".sproutgit"];
+            let entries = fs::read_dir(workspace)
+                .map_err(|e| format!("Failed to inspect repository directory: {e}"))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("Failed to inspect repository entry: {e}"))?;
+
+            let collisions = entries
+                .iter()
+                .filter_map(|entry| {
+                    let name = entry.file_name();
+                    let name_str = name.to_string_lossy();
+                    reserved
+                        .iter()
+                        .any(|reserved_name| *reserved_name == name_str)
+                        .then(|| name_str.into_owned())
+                })
+                .collect::<Vec<_>>();
+
+            if !collisions.is_empty() {
+                return Err(format!(
+                    "Cannot import repository in place: repository contains reserved workspace path(s): {}",
+                    collisions.join(", ")
+                ));
+            }
+
+            for entry in entries {
+                let name = entry.file_name();
+
+                let from = entry.path();
+                let to = root_path.join(name);
+                fs::rename(&from, &to).map_err(|e| {
+                    format!(
+                        "Failed to move '{}' into workspace root: {e}",
+                        from.display()
+                    )
+                })?;
+            }
+        },
+    }
+
+    Ok(())
 }
 
 // ── Commands ──
@@ -287,76 +460,60 @@ pub async fn import_git_repo_workspace(
     workspace_path: String,
     source_repo_path: String,
 ) -> Result<WorkspaceInitResult, String> {
-    let workspace = normalize_or_create_dir(&workspace_path)?;
-    let source_repo = normalize_existing_path(&source_repo_path)?;
+    import_git_repo_workspace_with_mode(
+        Some(workspace_path),
+        source_repo_path,
+        ImportRepoMode::Copy,
+    )
+    .await
+}
 
+#[tauri::command]
+pub async fn import_git_repo_workspace_with_mode(
+    workspace_path: Option<String>,
+    source_repo_path: String,
+    mode: ImportRepoMode,
+) -> Result<WorkspaceInitResult, String> {
+    let source_repo = normalize_existing_path(&source_repo_path)?;
     validate_clean_git_repo(&source_repo)?;
+
+    let workspace = match mode {
+        ImportRepoMode::InPlace => source_repo.clone(),
+        ImportRepoMode::Move | ImportRepoMode::Copy => {
+            let Some(path) = workspace_path
+                .as_deref()
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
+            else {
+                return Err("Workspace path is required for move/copy import modes".to_string());
+            };
+            normalize_or_create_dir(path)?
+        },
+    };
+
+    if matches!(mode, ImportRepoMode::Move | ImportRepoMode::Copy) && workspace == source_repo {
+        return Err(
+            "Workspace path must differ from repository path for move/copy modes".to_string(),
+        );
+    }
 
     let root_path = workspace.join("root");
     let worktrees_path = workspace.join("worktrees");
     let metadata_path = workspace.join(".sproutgit");
     let state_db_path = metadata_path.join("state.db");
-    let project_marker_path = metadata_path.join("project.json");
 
-    ensure_directory(&root_path)?;
-    ensure_directory(&worktrees_path)?;
-    ensure_directory(&metadata_path)?;
-
-    let root_has_content = fs::read_dir(&root_path)
-        .map_err(|e| format!("Failed to inspect root directory: {e}"))?
-        .next()
-        .is_some();
-
-    if root_has_content {
-        return Err("Cannot import into root/: directory is not empty".to_string());
-    }
-
-    let source_repo_string = source_repo.to_string_lossy().to_string();
-    let root_path_string = root_path.to_string_lossy().to_string();
-    let clone_output = git_command(
-        GitAction::Clone,
-        &[
-            "clone",
-            "--no-hardlinks",
-            "--",
-            &source_repo_string,
-            &root_path_string,
-        ],
-    )
-    .output()
-    .map_err(|e| format!("Failed to import repository: {e}"))?;
-
-    if !clone_output.status.success() {
-        let stderr = String::from_utf8_lossy(&clone_output.stderr)
-            .trim()
-            .to_string();
-        return Err(if stderr.is_empty() {
-            "Failed to import repository".to_string()
-        } else {
-            stderr
-        });
-    }
+    import_repo_with_mode(&workspace, &source_repo, mode)?;
 
     initialize_workspace_db(&workspace).await?;
 
-    if !project_marker_path.exists() {
-        write_project_marker(
-            &project_marker_path,
-            &workspace,
-            &root_path,
-            &worktrees_path,
-            &state_db_path,
-        )?;
-    }
-
-    Ok(WorkspaceInitResult {
-        workspace_path: workspace.to_string_lossy().to_string(),
-        root_path: root_path.to_string_lossy().to_string(),
-        worktrees_path: worktrees_path.to_string_lossy().to_string(),
-        metadata_path: metadata_path.to_string_lossy().to_string(),
-        state_db_path: state_db_path.to_string_lossy().to_string(),
-        cloned: true,
-    })
+    finalize_workspace(
+        &workspace,
+        &root_path,
+        &worktrees_path,
+        &metadata_path,
+        &state_db_path,
+        matches!(mode, ImportRepoMode::Copy),
+    )
 }
 
 #[tauri::command]

@@ -10,6 +10,8 @@ const {
 } = Astro.props;
 
 const canonical = new URL(Astro.url.pathname, Astro.site);
+const clarityTagId = import.meta.env.PUBLIC_CLARITY_TAG_ID?.trim();
+const shouldLoadClarity = import.meta.env.PROD && !!clarityTagId;
 ---
 
 <!doctype html>
@@ -42,10 +44,10 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
 
       document.addEventListener('DOMContentLoaded', () => {
         const revealAll = () => {
-          document.querySelectorAll('[data-animate]').forEach((el) => el.classList.add('is-visible'));
+          document.querySelectorAll('[data-animate]').forEach(el => el.classList.add('is-visible'));
           document
             .querySelectorAll('[data-graph] .graph-path, [data-graph] .graph-node')
-            .forEach((el) => el.classList.add('is-visible'));
+            .forEach(el => el.classList.add('is-visible'));
         };
         const prefersReducedMotion =
           typeof window.matchMedia === 'function' &&
@@ -56,8 +58,8 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
         } else {
           try {
             const observer = new IntersectionObserver(
-              (entries) => {
-                entries.forEach((e) => {
+              entries => {
+                entries.forEach(e => {
                   if (e.isIntersecting) {
                     e.target.classList.add('is-visible');
                     observer.unobserve(e.target);
@@ -66,22 +68,22 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
               },
               { threshold: 0.12 }
             );
-            document.querySelectorAll('[data-animate]').forEach((el) => observer.observe(el));
+            document.querySelectorAll('[data-animate]').forEach(el => observer.observe(el));
 
             const graphObserver = new IntersectionObserver(
-              (entries) => {
-                entries.forEach((e) => {
+              entries => {
+                entries.forEach(e => {
                   if (e.isIntersecting) {
-                    e.target.querySelectorAll('.graph-path, .graph-node').forEach((el) =>
-                      el.classList.add('is-visible')
-                    );
+                    e.target
+                      .querySelectorAll('.graph-path, .graph-node')
+                      .forEach(el => el.classList.add('is-visible'));
                     graphObserver.unobserve(e.target);
                   }
                 });
               },
               { threshold: 0.3 }
             );
-            document.querySelectorAll('[data-graph]').forEach((el) => graphObserver.observe(el));
+            document.querySelectorAll('[data-graph]').forEach(el => graphObserver.observe(el));
           } catch {
             revealAll();
           }
@@ -96,6 +98,18 @@ const canonical = new URL(Astro.url.pathname, Astro.site);
         }
       });
     </script>
+    {shouldLoadClarity && (
+      <script is:inline>
+        {`(function (c, l, a, r, i, t, y) {
+          c[a] = c[a] || function () { (c[a].q = c[a].q || []).push(arguments); };
+          t = l.createElement(r);
+          t.async = 1;
+          t.src = 'https://www.clarity.ms/tag/' + i;
+          y = l.getElementsByTagName(r)[0];
+          y.parentNode.insertBefore(t, y);
+        })(window, document, 'clarity', 'script', ${JSON.stringify(clarityTagId)});`}
+      </script>
+    )}
   </head>
   <body>
     <slot />

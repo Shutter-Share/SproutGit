@@ -1,10 +1,18 @@
 @import "@fontsource/space-grotesk/400.css";
 @import "@fontsource/space-grotesk/500.css";
 @import "@fontsource/space-grotesk/700.css";
+@import "@fontsource/plus-jakarta-sans/400.css";
+@import "@fontsource/plus-jakarta-sans/500.css";
+@import "@fontsource/plus-jakarta-sans/700.css";
+@import "@fontsource/fira-code/400.css";
+@import "@fontsource/fira-code/500.css";
 @import "tailwindcss";
 
 /* Light mode (default) */
 :root {
+  --sg-font-heading: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --sg-font-body: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  --sg-font-code: "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   --sg-titlebar-inset: 16px;
   --sg-bg: #f5f5f5;
   --sg-surface: #ffffff;
@@ -19,6 +27,8 @@
   --sg-danger: #c4314b;
   --sg-warning: #9a6700;
   --sg-accent: #2563eb;
+  --sg-avatar-bg: #dbe9e2;
+  --sg-avatar-text: #3c4a45;
   --sg-input-bg: #ffffff;
   --sg-input-border: #d4d4dc;
   --sg-input-focus: #1a8a5c;
@@ -45,6 +55,8 @@
     --sg-danger: #f38ba8;
     --sg-warning: #f9e2af;
     --sg-accent: #89b4fa;
+    --sg-avatar-bg: #2b3b35;
+    --sg-avatar-text: #d3ddd8;
     --sg-input-bg: #1a1a2a;
     --sg-input-border: #3a3a52;
     --sg-input-focus: #74c7a4;
@@ -65,12 +77,37 @@ body {
 body {
   color: var(--sg-text);
   background: var(--sg-bg);
-  font-family: "Space Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--sg-font-body);
   font-size: 13px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -webkit-user-select: none;
   user-select: none;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+.sg-heading,
+.sg-logo-text {
+  font-family: var(--sg-font-heading) !important;
+}
+
+.sg-body {
+  font-family: var(--sg-font-body);
+}
+
+code,
+pre,
+kbd,
+samp,
+.font-mono,
+.sg-code {
+  font-family: var(--sg-font-code);
+  font-variant-ligatures: common-ligatures contextual;
 }
 
 input, select, textarea {

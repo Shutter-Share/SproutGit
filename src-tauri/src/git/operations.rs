@@ -281,6 +281,27 @@ pub async fn list_refs(repo_path: String) -> Result<RefsResult, String> {
 }
 
 #[tauri::command]
+pub async fn count_commits(repo_path: String) -> Result<u64, String> {
+    let canonical = normalize_existing_path(&repo_path)?;
+    let output = run_git(
+        GitAction::CountCommits,
+        &[
+            "-C",
+            &canonical.to_string_lossy(),
+            "rev-list",
+            "--count",
+            "--all",
+        ],
+    )?;
+    let output = ensure_git_success(output, "Failed to count commits")?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout
+        .trim()
+        .parse::<u64>()
+        .map_err(|_| "Failed to parse commit count".to_string())
+}
+
+#[tauri::command]
 pub async fn get_commit_graph(
     repo_path: String,
     limit: Option<usize>,

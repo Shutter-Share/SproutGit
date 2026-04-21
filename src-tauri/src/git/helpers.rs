@@ -21,6 +21,7 @@ pub enum GitAction {
     WorktreeList,
     ListRefs,
     CommitGraph,
+    CountCommits,
     CreateManagedWorktree,
     DeleteManagedWorktree,
     PruneWorktrees,
@@ -45,11 +46,12 @@ pub enum GitAction {
 
 impl GitAction {
     #[cfg(test)]
-    pub const ALL: [GitAction; 24] = [
+    pub const ALL: [GitAction; 25] = [
         GitAction::GitInfo,
         GitAction::WorktreeList,
         GitAction::ListRefs,
         GitAction::CommitGraph,
+        GitAction::CountCommits,
         GitAction::CreateManagedWorktree,
         GitAction::DeleteManagedWorktree,
         GitAction::PruneWorktrees,
@@ -78,6 +80,7 @@ impl GitAction {
             GitAction::WorktreeList => "worktree_list",
             GitAction::ListRefs => "list_refs",
             GitAction::CommitGraph => "commit_graph",
+            GitAction::CountCommits => "count_commits",
             GitAction::CreateManagedWorktree => "create_managed_worktree",
             GitAction::DeleteManagedWorktree => "delete_managed_worktree",
             GitAction::PruneWorktrees => "prune_worktrees",
