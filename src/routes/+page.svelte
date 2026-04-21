@@ -1,5 +1,6 @@
 <script lang="ts">
   import { goto } from "$app/navigation";
+  import { tick } from "svelte";
   import { getVersion } from '@tauri-apps/api/app';
   import { open } from "@tauri-apps/plugin-dialog";
   import { openUrl } from "@tauri-apps/plugin-opener";
@@ -70,6 +71,12 @@
   let showCloneModal = $state(false);
   let showImportModal = $state(false);
   let appVersion = $state<string | null>(null);
+  let cloneUrlInput = $state<HTMLInputElement | null>(null);
+  let importRepoPathInput = $state<HTMLInputElement | null>(null);
+  let cloneDialog = $state<HTMLDivElement | null>(null);
+  let importDialog = $state<HTMLDivElement | null>(null);
+  let cloneReturnFocus = $state<HTMLElement | null>(null);
+  let importReturnFocus = $state<HTMLElement | null>(null);
 
   let workspacePath = $derived(
     projectsFolder && folderName ? `${projectsFolder}/${folderName}` : ""
@@ -96,6 +103,10 @@
     if (!trimmed) return "";
     const idx = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
     return idx === -1 ? trimmed : trimmed.slice(idx + 1);
+  }
+
+  function workspaceNameFromPath(path: string): string {
+    return repoNameFromPath(path) || path.trim() || "?";
   }
 
   function handleUrlInput() {
@@ -149,20 +160,84 @@
       importFolderName !== "" && importFolderName !== repoNameFromPath(importRepoPath);
   }
 
-  function openCloneModal() {
+  async function openCloneModal() {
     error = "";
     cloneProgress = [];
     clonePercent = null;
+    cloneReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     showCloneModal = true;
+    await tick();
+    if (cloneUrlInput) {
+      cloneUrlInput.focus();
+    } else {
+      cloneDialog?.focus();
+    }
   }
 
-  function openImportModal() {
+  async function openImportModal() {
     error = "";
     importMode = "inPlace";
     importRepoPath = "";
     importFolderName = "";
     importFolderNameManual = false;
+    importReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     showImportModal = true;
+    await tick();
+    if (importRepoPathInput) {
+      importRepoPathInput.focus();
+    } else {
+      importDialog?.focus();
+    }
+  }
+
+  async function closeCloneModal() {
+    showCloneModal = false;
+    await tick();
+    cloneReturnFocus?.focus();
+  }
+
+  async function closeImportModal() {
+    showImportModal = false;
+    await tick();
+    importReturnFocus?.focus();
+  }
+
+  function handleModalGlobalKeydown(event: KeyboardEvent) {
+    if (event.key !== "Escape") return;
+    if (showImportModal) {
+      event.preventDefault();
+      void closeImportModal();
+      return;
+    }
+    if (showCloneModal) {
+      event.preventDefault();
+      void closeCloneModal();
+    }
+  }
+
+  function trapModalFocus(event: KeyboardEvent, container: HTMLDivElement | null) {
+    if (event.key !== "Tab" || !container) return;
+    const focusable = Array.from(
+      container.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    ).filter((element) => !element.hasAttribute("disabled"));
+    if (focusable.length === 0) {
+      event.preventDefault();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    const active = document.activeElement as HTMLElement | null;
+    if (event.shiftKey && active === first) {
+      event.preventDefault();
+      last.focus();
+      return;
+    }
+    if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    }
   }
 
   async function browseProjectsFolder() {
@@ -255,7 +330,7 @@
       const created = await createWorkspace(workspacePath, cloneUrl);
       createdWorkspace = created;
       await saveKnownProject(created);
-      toast.success(`Workspace created: ${created.workspacePath.split('/').pop()}`);
+      toast.success(`Workspace created: ${workspaceNameFromPath(created.workspacePath)}`);
       await goto(`/workspace?workspace=${encodeURIComponent(created.workspacePath)}`);
     } catch (err) {
       error = String(err);
@@ -307,7 +382,7 @@
       );
       createdWorkspace = imported;
       await saveKnownProject(imported);
-      toast.success(`Workspace imported: ${imported.workspacePath.split('/').pop()}`);
+      toast.success(`Workspace imported: ${workspaceNameFromPath(imported.workspacePath)}`);
       await goto(`/workspace?workspace=${encodeURIComponent(imported.workspacePath)}`);
     } catch (err) {
       error = String(err);
@@ -332,7 +407,7 @@
       const msg = String(err);
       if (msg.includes("does not exist") || msg.includes("No such file") || msg.includes("not found") || msg.includes("not a SproutGit project")) {
         await removeKnownProject(path);
-        toast.error(`Project removed — path no longer exists: ${path.split("/").pop()}`);
+        toast.error(`Project removed — path no longer exists: ${workspaceNameFromPath(path)}`);
       } else {
         error = msg;
       }
@@ -402,6 +477,8 @@
         .catch(() => {});
     });
 </script>
+
+<svelte:window onkeydown={handleModalGlobalKeydown} />
 
 {#if !gitChecked}
   <main class="flex h-screen items-center justify-center bg-[var(--sg-bg)]">
@@ -508,10 +585,10 @@
                   disabled={opening}
                 >
                   <div class="sg-heading flex h-8 w-8 shrink-0 items-center justify-center rounded bg-[var(--sg-avatar-bg)] text-sm font-semibold text-[var(--sg-avatar-text)]">
-                    {project.workspacePath.split("/").pop()?.charAt(0).toUpperCase() ?? "?"}
+                    {workspaceNameFromPath(project.workspacePath).charAt(0).toUpperCase()}
                   </div>
                   <div class="min-w-0 flex-1">
-                    <p class="truncate text-sm font-medium text-[var(--sg-text)]">{project.workspacePath.split("/").pop()}</p>
+                    <p class="truncate text-sm font-medium text-[var(--sg-text)]">{workspaceNameFromPath(project.workspacePath)}</p>
                     <p class="truncate text-xs text-[var(--sg-text-faint)]">{project.workspacePath}</p>
                   </div>
                 </button>
@@ -522,7 +599,7 @@
                     e.stopPropagation();
                     void removeKnownProject(project.workspacePath)
                       .then(() => {
-                        toast.info(`Removed ${project.workspacePath.split("/").pop()} from recent projects`);
+                        toast.info(`Removed ${workspaceNameFromPath(project.workspacePath)} from recent projects`);
                       })
                       .catch((err) => {
                         toast.error(String(err));
@@ -550,16 +627,32 @@
   <!-- Clone modal -->
   {#if showCloneModal}
     <div
-      role="presentation"
+      role="button"
+      tabindex="0"
+      aria-label="Close clone dialog"
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-      onclick={(e) => { if (e.target === e.currentTarget) showCloneModal = false; }}
+      onclick={(e) => { if (e.target === e.currentTarget) void closeCloneModal(); }}
+      onkeydown={(event) => {
+        if ((event.key === "Enter" || event.key === " ") && event.target === event.currentTarget) {
+          event.preventDefault();
+          void closeCloneModal();
+        }
+      }}
     >
-      <div class="flex w-[480px] flex-col rounded-lg border border-[var(--sg-border)] bg-[var(--sg-surface)] shadow-2xl">
+      <div
+        bind:this={cloneDialog}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="clone-modal-title"
+        tabindex="-1"
+        onkeydown={(event) => trapModalFocus(event, cloneDialog)}
+        class="flex w-[480px] flex-col rounded-lg border border-[var(--sg-border)] bg-[var(--sg-surface)] shadow-2xl"
+      >
         <!-- Modal header -->
         <div class="flex items-center justify-between border-b border-[var(--sg-border-subtle)] px-4 py-3">
-          <h2 class="text-sm font-semibold text-[var(--sg-text)]">Clone Repository</h2>
+          <h2 id="clone-modal-title" class="text-sm font-semibold text-[var(--sg-text)]">Clone Repository</h2>
           <button
-            onclick={() => showCloneModal = false}
+            onclick={() => void closeCloneModal()}
             class="rounded p-1 text-[var(--sg-text-faint)] hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text)]"
           ><X size={16} /></button>
         </div>
@@ -581,6 +674,7 @@
               />
             {:else}
               <input
+                bind:this={cloneUrlInput}
                 id="modal-repo-url"
                 bind:value={cloneUrl}
                 oninput={handleUrlInput}
@@ -656,7 +750,7 @@
           <div class="flex justify-end gap-2 border-t border-[var(--sg-border-subtle)] pt-3">
             <button
               type="button"
-              onclick={() => showCloneModal = false}
+              onclick={() => void closeCloneModal()}
               class="rounded-md border border-[var(--sg-border)] bg-[var(--sg-surface-raised)] px-3.5 py-2 text-xs font-medium text-[var(--sg-text-dim)] hover:bg-[var(--sg-border)] hover:text-[var(--sg-text)]"
             >Cancel</button>
             <button
@@ -675,16 +769,32 @@
   <!-- Import Git Repo modal -->
   {#if showImportModal}
     <div
-      role="presentation"
+      role="button"
+      tabindex="0"
+      aria-label="Close import dialog"
       class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-      onclick={(e) => { if (e.target === e.currentTarget) showImportModal = false; }}
+      onclick={(e) => { if (e.target === e.currentTarget) void closeImportModal(); }}
+      onkeydown={(event) => {
+        if ((event.key === "Enter" || event.key === " ") && event.target === event.currentTarget) {
+          event.preventDefault();
+          void closeImportModal();
+        }
+      }}
     >
-      <div class="flex w-[520px] flex-col rounded-lg border border-[var(--sg-border)] bg-[var(--sg-surface)] shadow-2xl">
+      <div
+        bind:this={importDialog}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="import-modal-title"
+        tabindex="-1"
+        onkeydown={(event) => trapModalFocus(event, importDialog)}
+        class="flex w-[520px] flex-col rounded-lg border border-[var(--sg-border)] bg-[var(--sg-surface)] shadow-2xl"
+      >
         <!-- Modal header -->
         <div class="flex items-center justify-between border-b border-[var(--sg-border-subtle)] px-4 py-3">
-          <h2 class="text-sm font-semibold text-[var(--sg-text)]">Import Git Repo</h2>
+          <h2 id="import-modal-title" class="text-sm font-semibold text-[var(--sg-text)]">Import Git Repo</h2>
           <button
-            onclick={() => showImportModal = false}
+            onclick={() => void closeImportModal()}
             class="rounded p-1 text-[var(--sg-text-faint)] hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text)]"
           ><X size={16} /></button>
         </div>
@@ -695,6 +805,7 @@
             <label for="modal-import-repo-path" class="mb-1 block text-xs text-[var(--sg-text-dim)]">Where is the git repo?</label>
             <div class="flex gap-1.5">
               <input
+                bind:this={importRepoPathInput}
                 id="modal-import-repo-path"
                 bind:value={importRepoPath}
                 oninput={handleImportRepoPathInput}
@@ -779,7 +890,7 @@
           <div class="flex justify-end gap-2 border-t border-[var(--sg-border-subtle)] pt-3">
             <button
               type="button"
-              onclick={() => showImportModal = false}
+              onclick={() => void closeImportModal()}
               class="rounded-md border border-[var(--sg-border)] bg-[var(--sg-surface-raised)] px-3.5 py-2 text-xs font-medium text-[var(--sg-text-dim)] hover:bg-[var(--sg-border)] hover:text-[var(--sg-text)]"
             >Cancel</button>
             <button

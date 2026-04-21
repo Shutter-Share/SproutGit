@@ -794,9 +794,13 @@
       initializeGraphState(graphData);
       selectedRef = refsData.refs[0]?.name ?? "HEAD";
 
-      // Fetch total commit count in the background (may be slow on huge repos)
-      totalCommitCount = null;
-      countCommits(status.rootPath).then((n) => { totalCommitCount = n; }).catch(() => {});
+      if (graphHasMore) {
+        // Fetch total commit count in the background only when the first page is partial.
+        totalCommitCount = null;
+        countCommits(status.rootPath).then((n) => { totalCommitCount = n; }).catch(() => {});
+      } else {
+        totalCommitCount = graphData.commits.length;
+      }
 
       // Restore the previously active worktree if still valid (survives HMR).
       const savedWt = sessionStorage.getItem("sg_active_wt");
@@ -1040,9 +1044,13 @@
     worktrees = refreshedWt.worktrees;
     initializeGraphState(refreshedGraph);
     refs = refreshedRefs.refs;
-    // Refresh total commit count in the background
-    totalCommitCount = null;
-    countCommits(workspace.rootPath).then((n) => { totalCommitCount = n; }).catch(() => {});
+    if (graphHasMore) {
+      // Refresh total commit count in the background only when the graph is partial.
+      totalCommitCount = null;
+      countCommits(workspace.rootPath).then((n) => { totalCommitCount = n; }).catch(() => {});
+    } else {
+      totalCommitCount = refreshedGraph.commits.length;
+    }
     // Refresh change counts for all non-root worktrees
     const nonRoot = refreshedWt.worktrees
       .filter((wt) => wt.path !== workspace!.rootPath)
