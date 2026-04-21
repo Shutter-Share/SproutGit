@@ -227,6 +227,180 @@ html.js [data-animate].is-visible {
   box-shadow: 0 8px 32px color-mix(in srgb, var(--sg-primary) 10%, transparent);
 }
 
+/* ── Hero downloads ── */
+.hero-downloads {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.9rem;
+}
+
+.hero-download-menu-wrap {
+  position: relative;
+}
+
+.download-platforms-trigger {
+  cursor: pointer;
+}
+
+.download-platforms-menu {
+  position: absolute;
+  top: calc(100% + 0.6rem);
+  left: 0;
+  z-index: 20;
+  min-width: 12rem;
+  padding: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--sg-border) 75%, transparent);
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--sg-surface) 94%, transparent);
+  box-shadow: 0 16px 36px color-mix(in srgb, #000 12%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.download-platforms-menu a {
+  display: block;
+  padding: 0.7rem 0.8rem;
+  border-radius: 0.7rem;
+  color: var(--sg-text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.download-platforms-menu a:hover {
+  background: color-mix(in srgb, var(--sg-primary) 10%, transparent);
+  color: var(--sg-primary);
+}
+
+.download-links-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem 1rem;
+  align-items: center;
+  color: var(--sg-text-faint);
+  font-size: 0.94rem;
+}
+
+.download-links-row a {
+  color: var(--sg-text-dim);
+  text-decoration: none;
+}
+
+.download-links-row a:hover {
+  color: var(--sg-primary);
+}
+
+.download-links-label {
+  color: var(--sg-text-faint);
+}
+
+.download-warning-dialog {
+  width: min(38rem, calc(100vw - 2rem));
+  max-height: calc(100vh - 2rem);
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--sg-border) 70%, transparent);
+  border-radius: 1.4rem;
+  background: var(--sg-surface);
+  color: var(--sg-text);
+  box-shadow: 0 24px 80px color-mix(in srgb, #000 28%, transparent);
+  overflow: auto;
+}
+
+.download-warning-dialog[open] {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+}
+
+.download-warning-dialog::backdrop {
+  background: color-mix(in srgb, #000 55%, transparent);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+.download-warning-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.5rem;
+}
+
+.download-warning-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: start;
+}
+
+.download-warning-header h2,
+.download-warning-panel p,
+.download-warning-panel ol {
+  margin: 0;
+}
+
+.download-warning-kicker {
+  margin: 0 0 0.4rem;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #b45309;
+}
+
+.download-warning-close,
+.download-warning-secondary {
+  border: 1px solid color-mix(in srgb, var(--sg-border) 85%, transparent);
+  background: transparent;
+  color: var(--sg-text-dim);
+}
+
+.download-warning-close {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.download-warning-panel ol {
+  list-style: decimal;
+  padding-left: 1.2rem;
+  color: var(--sg-text-dim);
+}
+
+.download-warning-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.download-warning-secondary,
+.download-warning-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.9rem;
+  padding: 0.8rem 1rem;
+  border-radius: 0.9rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.download-warning-primary {
+  background: var(--sg-primary);
+  color: #fff;
+}
+
+@media (max-width: 768px) {
+  .download-links-row {
+    font-size: 0.88rem;
+  }
+
+  .download-platforms-menu {
+    min-width: 11rem;
+  }
+}
+
 /* ── Why section directory tree ── */
 .dir-tree {
   font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", ui-monospace, monospace;
