@@ -3,6 +3,8 @@
   import { openUrl } from "@tauri-apps/plugin-opener";
   import Spinner from "$lib/components/Spinner.svelte";
   import WindowControls from "$lib/components/WindowControls.svelte";
+  import { getVersion } from "@tauri-apps/api/app";
+  import type { Update } from "@tauri-apps/plugin-updater";
   import {
     getGitInfo,
     getGithubAuthStatus,
@@ -41,7 +43,17 @@
       : "";
   let workspacePath = $state(initialWorkspacePath);
 
+  // ── App Version ──
+  let appVersion = $state<string | null>(null);
+
+  // ── Update State ──
+  let updateChecking = $state(false);
+  let updateAvailable = $state<Update | null>(null);
+  let updateInstalling = $state(false);
+  let updateChecked = $state(false);
+
   // Load initial state
+  getVersion().then((v) => { appVersion = v; });
   getGitInfo().then((info) => { gitInfo = info; });
   getGithubAuthStatus().then((s) => { githubAuth = s; });
 
@@ -328,6 +340,77 @@
           {:else}
             <div class="text-sm text-[var(--sg-danger)]">Git not found</div>
           {/if}
+        </div>
+      </section>
+
+      <!-- About -->
+      <section>
+        <h2 class="mb-1 text-sm font-semibold text-[var(--sg-text)]">About</h2>
+        <div class="rounded-lg border border-[var(--sg-border)] bg-[var(--sg-surface)] px-4 py-3 flex flex-col gap-3">
+          <div class="flex items-center justify-between">
+            <span class="text-xs text-[var(--sg-text-dim)]">SproutGit</span>
+            <span class="font-mono text-xs text-[var(--sg-text-faint)]">
+              {#if appVersion !== null}
+                v{appVersion}
+              {:else}
+                <Spinner size="sm" />
+              {/if}
+            </span>
+          </div>
+          <div class="flex items-center justify-between border-t border-[var(--sg-border)] pt-3">
+            {#if updateAvailable}
+              <div class="flex flex-col gap-0.5">
+                <span class="text-xs font-medium text-[var(--sg-primary)]">Update v{updateAvailable.version} available</span>
+                {#if updateAvailable.body}
+                  <span class="text-xs text-[var(--sg-text-faint)]">{updateAvailable.body}</span>
+                {/if}
+              </div>
+              <button
+                class="shrink-0 rounded border border-[var(--sg-primary)] px-3 py-1.5 text-xs text-[var(--sg-primary)] hover:bg-[var(--sg-primary)]/10 disabled:opacity-50"
+                onclick={async () => {
+                  updateInstalling = true;
+                  try {
+                    await updateAvailable!.downloadAndInstall();
+                    const { relaunch } = await import('@tauri-apps/plugin-process');
+                    await relaunch();
+                  } catch (err) {
+                    toast.error(String(err));
+                    updateInstalling = false;
+                  }
+                }}
+                disabled={updateInstalling}
+              >
+                {#if updateInstalling}<Spinner size="sm" />{/if}
+                {updateInstalling ? 'Installing…' : 'Install & Restart'}
+              </button>
+            {:else}
+              <span class="text-xs text-[var(--sg-text-faint)]">
+                {#if updateChecked}Up to date{:else}Check for the latest version{/if}
+              </span>
+              <button
+                class="shrink-0 rounded border border-[var(--sg-border)] bg-[var(--sg-surface-raised)] px-3 py-1.5 text-xs text-[var(--sg-text-dim)] hover:bg-[var(--sg-border)] hover:text-[var(--sg-text)] disabled:opacity-50"
+                onclick={async () => {
+                  updateChecking = true;
+                  updateChecked = false;
+                  try {
+                    const { check } = await import('@tauri-apps/plugin-updater');
+                    const update = await check();
+                    updateAvailable = update;
+                    updateChecked = true;
+                    if (!update) toast.info('You\'re on the latest version');
+                  } catch (err) {
+                    toast.error('Update check failed: ' + String(err));
+                  } finally {
+                    updateChecking = false;
+                  }
+                }}
+                disabled={updateChecking}
+              >
+                {#if updateChecking}<Spinner size="sm" />{/if}
+                {updateChecking ? 'Checking…' : 'Check for Updates'}
+              </button>
+            {/if}
+          </div>
         </div>
       </section>
 

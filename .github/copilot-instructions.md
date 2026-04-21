@@ -1,5 +1,10 @@
 # SproutGit — Copilot Instructions
 
+## Repository
+
+- **Owner / GitHub org**: [Shutter-Share](https://github.com/Shutter-Share)
+- **Repo URL**: https://github.com/Shutter-Share/SproutGit.git
+
 ## What is SproutGit?
 
 Open-source, cross-platform Git desktop app with a **worktree-first** workflow. The MVP lets users clone/init repos, manage Git worktrees in a prescribed directory layout, view a commit graph, and create branches paired with worktrees.
