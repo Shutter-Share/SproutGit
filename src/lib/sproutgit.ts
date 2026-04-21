@@ -228,6 +228,19 @@ export const importGitRepoWorkspace = (workspacePath: string, sourceRepoPath: st
     sourceRepoPath,
   });
 
+export type ImportRepoMode = 'inPlace' | 'move' | 'copy';
+
+export const importGitRepoWorkspaceWithMode = (
+  sourceRepoPath: string,
+  mode: ImportRepoMode,
+  workspacePath?: string | null
+) =>
+  invoke<WorkspaceInitResult>('import_git_repo_workspace_with_mode', {
+    sourceRepoPath,
+    mode,
+    workspacePath: workspacePath?.trim() ? workspacePath : null,
+  });
+
 export const inspectWorkspace = (workspacePath: string) =>
   invoke<WorkspaceStatus>('inspect_sproutgit_workspace', { workspacePath });
 
@@ -258,6 +271,9 @@ export const getCommitGraph = (repoPath: string, limit?: number | null, skip?: n
     limit: limit ?? null,
     skip: skip ?? null,
   });
+
+export const countCommits = (repoPath: string) =>
+  invoke<number>('count_commits', { repoPath });
 
 export const createManagedWorktree = (
   rootRepoPath: string,
