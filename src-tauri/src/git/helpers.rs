@@ -10,9 +10,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// Git for Windows cannot handle these prefixed paths correctly.
 fn strip_win_prefix(p: PathBuf) -> PathBuf {
     #[cfg(target_os = "windows")]
-    {
-        return dunce::simplified(&p).to_path_buf();
-    }
+    return dunce::simplified(&p).to_path_buf();
+    #[cfg(not(target_os = "windows"))]
     p
 }
 
