@@ -242,7 +242,7 @@ jobs:
           VERSION="${BASE_VERSION}.${{ github.run_number }}"
           TAG="v${VERSION}"
           DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          BASE_URL="https://github.com/Shutter-Share/SproutGit/releases/download/${TAG}"
+          BASE_URL="https://github.com/InterestingSoftware/SproutGit/releases/download/${TAG}"
 
           find_required_artifact() {
             local artifact_dir="$1"

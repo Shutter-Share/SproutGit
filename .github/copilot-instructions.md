@@ -2,8 +2,8 @@
 
 ## Repository
 
-- **Owner / GitHub org**: [Shutter-Share](https://github.com/Shutter-Share)
-- **Repo URL**: https://github.com/Shutter-Share/SproutGit.git
+- **Owner / GitHub org**: [InterestingSoftware](https://github.com/InterestingSoftware)
+- **Repo URL**: https://github.com/InterestingSoftware/SproutGit.git
 
 ## What is SproutGit?
 
