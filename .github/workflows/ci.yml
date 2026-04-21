@@ -204,20 +204,48 @@ jobs:
       - name: Generate latest.json
         shell: bash
         run: |
+          set -euo pipefail
+
           VERSION="${BASE_VERSION}.${{ github.run_number }}"
           TAG="v${VERSION}"
           DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
           BASE_URL="https://github.com/Shutter-Share/SproutGit/releases/download/${TAG}"
 
-          MACOS_TAR=$(find artifacts/SproutGit-macos -name "*.app.tar.gz" | head -1)
+          find_required_artifact() {
+            local artifact_dir="$1"
+            local pattern="$2"
+            local label="$3"
+            local artifact_path
+
+            if [[ ! -d "$artifact_dir" ]]; then
+              echo "::error::Missing artifact directory for ${label}: '${artifact_dir}'."
+              exit 1
+            fi
+
+            artifact_path=$(find "$artifact_dir" -name "$pattern" ! -name "*.sig" | head -n 1)
+
+            if [[ -z "$artifact_path" ]]; then
+              echo "::error::Missing ${label} artifact. Expected '${pattern}' under '${artifact_dir}'."
+              exit 1
+            fi
+
+            if [[ ! -f "${artifact_path}.sig" ]]; then
+              echo "::error::Missing signature for ${label} artifact: '${artifact_path}.sig'."
+              exit 1
+            fi
+
+            printf '%s\n' "$artifact_path"
+          }
+
+          MACOS_TAR=$(find_required_artifact "artifacts/SproutGit-macos" "*.app.tar.gz" "macOS")
           MACOS_SIG=$(cat "${MACOS_TAR}.sig")
           MACOS_FILENAME=$(basename "$MACOS_TAR")
 
-          LINUX_IMG=$(find artifacts/SproutGit-linux -name "*.AppImage" ! -name "*.sig" | head -1)
+          LINUX_IMG=$(find_required_artifact "artifacts/SproutGit-linux" "*.AppImage" "Linux")
           LINUX_SIG=$(cat "${LINUX_IMG}.sig")
           LINUX_FILENAME=$(basename "$LINUX_IMG")
 
-          WIN_MSI=$(find artifacts/SproutGit-windows -name "*.msi" ! -name "*.sig" | head -1)
+          WIN_MSI=$(find_required_artifact "artifacts/SproutGit-windows" "*.msi" "Windows")
           WIN_SIG=$(cat "${WIN_MSI}.sig")
           WIN_FILENAME=$(basename "$WIN_MSI")
 
@@ -235,7 +263,6 @@ jobs:
               pub_date: $date,
               platforms: {
                 "darwin-aarch64": {url: $macos_url, signature: $macos_sig},
-                "darwin-x86_64":  {url: $macos_url, signature: $macos_sig},
                 "linux-x86_64":   {url: $linux_url, signature: $linux_sig},
                 "windows-x86_64": {url: $win_url,   signature: $win_sig}
               }

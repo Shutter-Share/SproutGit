@@ -53,7 +53,13 @@
   let updateChecked = $state(false);
 
   // Load initial state
-  getVersion().then((v) => { appVersion = v; });
+  getVersion()
+    .then((v) => {
+      appVersion = v;
+    })
+    .catch(() => {
+      appVersion = "unknown";
+    });
   getGitInfo().then((info) => { gitInfo = info; });
   getGithubAuthStatus().then((s) => { githubAuth = s; });
 
@@ -375,6 +381,7 @@
                     await relaunch();
                   } catch (err) {
                     toast.error(String(err));
+                  } finally {
                     updateInstalling = false;
                   }
                 }}
