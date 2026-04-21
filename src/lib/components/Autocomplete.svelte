@@ -42,6 +42,10 @@
   }
 
   function handleInput() {
+    const selected = items.find((item) => item.value === value);
+    if (!selected || query !== selected.label) {
+      value = query;
+    }
     open = true;
     highlightIdx = 0;
   }
