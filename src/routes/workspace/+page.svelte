@@ -15,6 +15,7 @@
     createManagedWorktree,
     deleteManagedWorktree,
     getCommitGraph,
+    countCommits,
     getDiffContent,
     getDiffFiles,
     inspectWorkspace,
@@ -72,6 +73,7 @@
   let graphSkip = $state(0);
   let graphHasMore = $state(false);
   let graphLoadingMore = $state(false);
+  let totalCommitCount = $state<number | null>(null);
   let graphSeenHashes = new Set<string>();
   let graphGeneration = 0;
   let loading = $state(true);
@@ -792,6 +794,10 @@
       initializeGraphState(graphData);
       selectedRef = refsData.refs[0]?.name ?? "HEAD";
 
+      // Fetch total commit count in the background (may be slow on huge repos)
+      totalCommitCount = null;
+      countCommits(status.rootPath).then((n) => { totalCommitCount = n; }).catch(() => {});
+
       // Restore the previously active worktree if still valid (survives HMR).
       const savedWt = sessionStorage.getItem("sg_active_wt");
       if (savedWt && worktreeData.worktrees.some((wt) => wt.path === savedWt)) {
@@ -1034,6 +1040,9 @@
     worktrees = refreshedWt.worktrees;
     initializeGraphState(refreshedGraph);
     refs = refreshedRefs.refs;
+    // Refresh total commit count in the background
+    totalCommitCount = null;
+    countCommits(workspace.rootPath).then((n) => { totalCommitCount = n; }).catch(() => {});
     // Refresh change counts for all non-root worktrees
     const nonRoot = refreshedWt.worktrees
       .filter((wt) => wt.path !== workspace!.rootPath)
@@ -1754,7 +1763,15 @@
                   </span>
                 {/if}
               </div>
-              <span class="text-[10px] text-[var(--sg-text-faint)]">{graph?.commits.length ?? 0} commits</span>
+              <span class="text-[10px] text-[var(--sg-text-faint)]">
+                {#if graphHasMore && totalCommitCount !== null}
+                  Showing {(graph?.commits.length ?? 0).toLocaleString()} of {totalCommitCount.toLocaleString()} commits
+                {:else if graphHasMore}
+                  {(graph?.commits.length ?? 0).toLocaleString()}+ commits
+                {:else}
+                  {(graph?.commits.length ?? 0).toLocaleString()} commits
+                {/if}
+              </span>
             </div>
 
             <div class="flex flex-1 flex-col overflow-hidden bg-[var(--sg-bg)]">

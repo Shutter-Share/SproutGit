@@ -27,6 +27,8 @@
   --sg-danger: #c4314b;
   --sg-warning: #9a6700;
   --sg-accent: #2563eb;
+  --sg-avatar-bg: #dbe9e2;
+  --sg-avatar-text: #3c4a45;
   --sg-input-bg: #ffffff;
   --sg-input-border: #d4d4dc;
   --sg-input-focus: #1a8a5c;
@@ -53,6 +55,8 @@
     --sg-danger: #f38ba8;
     --sg-warning: #f9e2af;
     --sg-accent: #89b4fa;
+    --sg-avatar-bg: #2b3b35;
+    --sg-avatar-text: #d3ddd8;
     --sg-input-bg: #1a1a2a;
     --sg-input-border: #3a3a52;
     --sg-input-focus: #74c7a4;

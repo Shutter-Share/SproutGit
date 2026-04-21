@@ -129,7 +129,7 @@
   let diffToolDisplay = $derived(findToolDisplay(currentDiffTool));
   let mergeToolDisplay = $derived(findToolDisplay(currentMergeTool));
 
-  getVersion().then((v) => (appVersion = v)).catch(() => (appVersion = 'unknown'));
+  getVersion().then((v) => (appVersion = import.meta.env.DEV ? 'dev build' : v)).catch(() => (appVersion = 'unknown'));
   getGitInfo()
     .then((info) => (gitInfo = info))
     .catch(() => (gitInfo = { installed: false, version: 'Unavailable' }));
@@ -475,7 +475,7 @@
 
           <section class="rounded-lg border border-(--sg-border) bg-(--sg-surface) p-5">
             <div class="mb-2 flex items-center gap-2"><Info size={16} class="text-(--sg-primary)" /><h2 class="sg-heading text-sm font-semibold text-(--sg-primary)">About</h2></div>
-            <div class="flex items-center justify-between"><span class="sg-logo-text text-xs text-(--sg-text)">SproutGit</span><span class="font-mono text-xs text-(--sg-text-dim)">{#if appVersion !== null}v{appVersion}{:else}<Spinner size="sm" />{/if}</span></div>
+            <div class="flex items-center justify-between"><span class="sg-logo-text text-xs text-(--sg-text)">SproutGit</span><span class="font-mono text-xs text-(--sg-text-dim)">{#if appVersion !== null}{import.meta.env.DEV ? appVersion : `v${appVersion}`}{:else}<Spinner size="sm" />{/if}</span></div>
             <div class="mt-3 border-t border-(--sg-border) pt-3">
               {#if !updaterEnabled}
                 <p class="mb-2 text-xs text-(--sg-text-faint)">Updater is disabled in development builds.</p>
