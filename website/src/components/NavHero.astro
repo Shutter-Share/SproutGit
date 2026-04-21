@@ -1,21 +1,23 @@
 ---
 // Stitch baseline: dark hero screen codegen, adapted for Astro + Fontsource + truthful content
 const GITHUB = 'https://github.com/InterestingSoftware/SproutGit';
+const RELEASES_API = 'https://api.github.com/repos/InterestingSoftware/SproutGit/releases/latest';
+const RELEASES_PAGE = `${GITHUB}/releases/latest`;
 ---
 
 <!-- Nav -->
 <header class="fixed top-0 left-0 right-0 z-50 transition-all duration-300" id="site-nav">
   <nav class="flex justify-between items-center w-full px-12 py-5 max-w-screen-2xl mx-auto">
-    <a href="/" class="flex items-center gap-2.5 no-underline text-[var(--sg-text)]">
+    <a href="/" class="flex items-center gap-2.5 no-underline text-(--sg-text)">
       <img src="/logo.svg" alt="SproutGit logo" width="28" height="28" class="w-7 h-7"/>
       <span class="font-bold text-lg tracking-tight" style="letter-spacing:-0.025em;">SproutGit</span>
     </a>
 
     <div class="hidden md:flex items-center gap-10">
-      <a href="#why" class="text-sm font-medium text-[var(--sg-text-dim)] hover:text-[var(--sg-text)] transition-colors">Why worktrees?</a>
-      <a href="#features" class="text-sm font-medium text-[var(--sg-text-dim)] hover:text-[var(--sg-text)] transition-colors">Features</a>
+      <a href="#why" class="text-sm font-medium text-(--sg-text-dim) hover:text-(--sg-text) transition-colors">Why worktrees?</a>
+      <a href="#features" class="text-sm font-medium text-(--sg-text-dim) hover:text-(--sg-text) transition-colors">Features</a>
       <a href={GITHUB} target="_blank" rel="noopener noreferrer"
-         class="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border border-[var(--sg-border)] text-[var(--sg-text-dim)] hover:border-[var(--sg-primary)] hover:text-[var(--sg-primary)] transition-all">
+        class="flex items-center gap-2 text-sm font-medium px-4 py-2 rounded-lg border border-(--sg-border) text-(--sg-text-dim) hover:border-(--sg-primary) hover:text-(--sg-primary) transition-all">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <path d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.342-3.369-1.342-.454-1.155-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 12 6.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z"/>
         </svg>
@@ -54,7 +56,7 @@ const GITHUB = 'https://github.com/InterestingSoftware/SproutGit';
       </div>
 
       <!-- Headline — Stitch layout with gradient text -->
-      <h1 data-animate class="font-bold leading-[0.92] tracking-tighter text-[var(--sg-text)]"
+      <h1 data-animate class="font-bold leading-[0.92] tracking-tighter text-(--sg-text)"
           style="font-size: clamp(3rem, 7vw, 5.5rem); letter-spacing: -0.045em;">
         Git built for<br>
         <span style="background: linear-gradient(135deg, var(--sg-primary) 0%, var(--sg-mint) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">
@@ -68,21 +70,85 @@ const GITHUB = 'https://github.com/InterestingSoftware/SproutGit';
       </p>
 
       <!-- CTAs -->
-      <div data-animate class="flex flex-wrap gap-4 mt-2">
-        <a href={GITHUB} target="_blank" rel="noopener noreferrer"
-           class="flex items-center gap-3 px-8 py-4 rounded-xl text-lg font-bold text-white transition-all hover:-translate-y-0.5"
-           style="background: var(--sg-primary); box-shadow: 0 0 0 0 color-mix(in srgb, var(--sg-primary) 30%, transparent);">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.342-3.369-1.342-.454-1.155-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0 1 12 6.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.163 22 16.418 22 12c0-5.523-4.477-10-10-10z"/>
-          </svg>
-          View on GitHub
-        </a>
-        <a href="#features"
-           class="flex items-center gap-2 px-8 py-4 rounded-xl text-lg font-bold transition-all"
-           style="color: var(--sg-primary); border: 1.5px solid color-mix(in srgb, var(--sg-primary) 30%, transparent);">
-          See features ↓
-        </a>
+      <div data-animate class="hero-downloads mt-2" data-download-root data-api={RELEASES_API} data-fallback={RELEASES_PAGE}>
+        <div class="flex flex-wrap gap-4">
+          <a href={RELEASES_PAGE}
+             class="flex items-center gap-3 px-8 py-4 rounded-xl text-lg font-bold text-white transition-all hover:-translate-y-0.5"
+             style="background: var(--sg-primary); box-shadow: 0 0 0 0 color-mix(in srgb, var(--sg-primary) 30%, transparent);"
+             data-primary-download>
+            Download preview
+          </a>
+          <a href="#features"
+             class="flex items-center gap-2 px-8 py-4 rounded-xl text-lg font-bold transition-all"
+             style="color: var(--sg-primary); border: 1.5px solid color-mix(in srgb, var(--sg-primary) 30%, transparent);">
+            See features ↓
+          </a>
+          <div class="hero-download-menu-wrap">
+            <button type="button"
+                    class="download-platforms-trigger flex items-center gap-2 px-6 py-4 rounded-xl text-base font-bold transition-all"
+                    style="color: var(--sg-text); border: 1.5px solid color-mix(in srgb, var(--sg-border) 85%, transparent); background: color-mix(in srgb, var(--sg-surface) 72%, transparent);"
+                    aria-expanded="false"
+                    aria-controls="platform-downloads-menu"
+                    data-platforms-trigger>
+              Other platforms
+              <span aria-hidden="true">▾</span>
+            </button>
+            <div id="platform-downloads-menu" class="download-platforms-menu" hidden data-platforms-menu>
+              <a href={RELEASES_PAGE} target="_blank" rel="noopener noreferrer" data-platform-link="macos">macOS</a>
+              <a href={RELEASES_PAGE} target="_blank" rel="noopener noreferrer" data-platform-link="windows">Windows</a>
+              <a href={RELEASES_PAGE} target="_blank" rel="noopener noreferrer" data-platform-link="linux">Linux</a>
+            </div>
+          </div>
+        </div>
+
+        <div class="download-links-row">
+          <span class="download-links-label" data-download-status>Loading latest release…</span>
+          <a href={GITHUB} target="_blank" rel="noopener noreferrer">GitHub</a>
+          <a href={RELEASES_PAGE} target="_blank" rel="noopener noreferrer">All releases</a>
+          <a href={RELEASES_PAGE} target="_blank" rel="noopener noreferrer" data-inline-platform-link="macos">macOS</a>
+          <a href={RELEASES_PAGE} target="_blank" rel="noopener noreferrer" data-inline-platform-link="windows">Windows</a>
+          <a href={RELEASES_PAGE} target="_blank" rel="noopener noreferrer" data-inline-platform-link="linux">Linux</a>
+        </div>
       </div>
+
+      <dialog class="download-warning-dialog" data-mac-dialog>
+        <div class="download-warning-panel">
+          <div class="download-warning-header">
+            <div>
+              <h2>Unsigned macOS preview build</h2>
+            </div>
+            <button type="button" class="download-warning-close" aria-label="Close download warning" data-close-mac-dialog>✕</button>
+          </div>
+
+          <p>
+            While we are in early development, SproutGit for macOS is not signed or notarized yet.
+            Because of that, macOS may show warnings such as "can’t be opened" or "is damaged and can’t be opened," even when downloaded from our official release page.
+          </p>
+          <p>
+            By launch, we plan to ship signed builds so this warning goes away.
+            For now, if you downloaded SproutGit from our official site or GitHub releases, follow the steps below to allow this app.
+          </p>
+
+          <ol>
+            <li>Open the downloaded `.dmg` and drag SproutGit into Applications.</li>
+            <li>In Finder, open Applications and Control-click SproutGit.</li>
+            <li>Choose Open, then confirm Open again in the system dialog.</li>
+            <li>If it still says "is damaged", remove quarantine in Terminal: <code>xattr -dr com.apple.quarantine /Applications/SproutGit.app</code></li>
+            <li>Then try opening SproutGit again (or run: <code>open /Applications/SproutGit.app</code>).</li>
+          </ol>
+
+          <div class="download-warning-actions">
+            <button type="button" class="download-warning-secondary" data-close-mac-dialog>Cancel</button>
+            <a href={RELEASES_PAGE}
+               target="_blank"
+               rel="noopener noreferrer"
+               class="download-warning-primary"
+               data-mac-download-link>
+              Continue to download
+            </a>
+          </div>
+        </div>
+      </dialog>
 
       <!-- Meta strip -->
       <div data-animate class="flex items-center gap-8 mt-6 opacity-60">
@@ -99,7 +165,7 @@ const GITHUB = 'https://github.com/InterestingSoftware/SproutGit';
     </div>
 
     <!-- Right: Graph panel — adapted from Stitch SVG + floating cards -->
-    <div class="lg:col-span-5 relative flex justify-center items-center h-[560px]" data-animate data-graph>
+    <div class="lg:col-span-5 relative flex justify-center items-center h-140" data-animate data-graph>
 
       <!-- Panel -->
       <div class="absolute inset-0 rounded-3xl overflow-hidden border flex items-center justify-center p-6"
@@ -191,6 +257,193 @@ const GITHUB = 'https://github.com/InterestingSoftware/SproutGit';
     </div>
   </section>
 </main>
+
+<script is:inline>
+  (() => {
+    const root = document.querySelector('[data-download-root]');
+    if (!root) return;
+
+    const apiUrl = root.getAttribute('data-api') || 'https://api.github.com/repos/InterestingSoftware/SproutGit/releases/latest';
+    const fallbackUrl = root.getAttribute('data-fallback') || 'https://github.com/InterestingSoftware/SproutGit/releases/latest';
+    const primaryLink = root.querySelector('[data-primary-download]');
+    const trigger = root.querySelector('[data-platforms-trigger]');
+    const menu = root.querySelector('[data-platforms-menu]');
+    const status = root.querySelector('[data-download-status]');
+    const dialog = document.querySelector('[data-mac-dialog]');
+    const macDownloadLink = document.querySelector('[data-mac-download-link]');
+    const closeButtons = document.querySelectorAll('[data-close-mac-dialog]');
+
+    const menuLinks = {
+      macos: root.querySelector('[data-platform-link="macos"]'),
+      windows: root.querySelector('[data-platform-link="windows"]'),
+      linux: root.querySelector('[data-platform-link="linux"]'),
+    };
+
+    const inlineLinks = {
+      macos: root.querySelector('[data-inline-platform-link="macos"]'),
+      windows: root.querySelector('[data-inline-platform-link="windows"]'),
+      linux: root.querySelector('[data-inline-platform-link="linux"]'),
+    };
+
+    const detectOS = () => {
+      const rawUserAgentData = 'userAgentData' in navigator ? navigator['userAgentData'] : undefined;
+      /** @type {{ platform?: string } | undefined} */
+      const userAgentData = rawUserAgentData && typeof rawUserAgentData === 'object' ? rawUserAgentData : undefined;
+      const platform = (userAgentData && typeof userAgentData.platform === 'string'
+        ? userAgentData.platform
+        : navigator.platform || navigator.userAgent || '').toLowerCase();
+
+      if (platform.includes('mac')) return 'macos';
+      if (platform.includes('win')) return 'windows';
+      if (platform.includes('linux') || platform.includes('x11')) return 'linux';
+      return 'unknown';
+    };
+
+    const assetMatchers = {
+      macos: (/** @type {{ name: string }} */ asset) => asset.name.endsWith('.dmg') && /aarch64|arm64/i.test(asset.name),
+      windows: (/** @type {{ name: string }} */ asset) => asset.name.endsWith('.msi'),
+      linux: (/** @type {{ name: string }} */ asset) => asset.name.endsWith('.AppImage'),
+    };
+
+    const platformLabels = {
+      macos: 'macOS',
+      windows: 'Windows',
+      linux: 'Linux',
+      unknown: 'your OS',
+    };
+
+    const links = {
+      macos: fallbackUrl,
+      windows: fallbackUrl,
+      linux: fallbackUrl,
+    };
+
+    const recommended = detectOS();
+
+    const setStatus = (/** @type {string} */ message) => {
+      if (status) status.textContent = message;
+    };
+
+    const setPrimaryLink = (/** @type {string} */ href, /** @type {string} */ label) => {
+      if (!(primaryLink instanceof HTMLAnchorElement)) return;
+      primaryLink.href = href;
+      primaryLink.textContent = label;
+    };
+
+    const syncLinks = () => {
+      if (menuLinks.macos instanceof HTMLAnchorElement) menuLinks.macos.href = links.macos;
+      if (menuLinks.windows instanceof HTMLAnchorElement) menuLinks.windows.href = links.windows;
+      if (menuLinks.linux instanceof HTMLAnchorElement) menuLinks.linux.href = links.linux;
+
+      if (inlineLinks.macos instanceof HTMLAnchorElement) inlineLinks.macos.href = links.macos;
+      if (inlineLinks.windows instanceof HTMLAnchorElement) inlineLinks.windows.href = links.windows;
+      if (inlineLinks.linux instanceof HTMLAnchorElement) inlineLinks.linux.href = links.linux;
+
+      if (macDownloadLink instanceof HTMLAnchorElement) {
+        macDownloadLink.href = links.macos;
+      }
+    };
+
+    const closeMenu = () => {
+      if (!(trigger instanceof HTMLButtonElement) || !(menu instanceof HTMLElement)) return;
+      menu.hidden = true;
+      trigger.setAttribute('aria-expanded', 'false');
+    };
+
+    if (trigger instanceof HTMLButtonElement && menu instanceof HTMLElement) {
+      trigger.addEventListener('click', () => {
+        const isHidden = menu.hidden;
+        menu.hidden = !isHidden;
+        trigger.setAttribute('aria-expanded', isHidden ? 'true' : 'false');
+      });
+
+      document.addEventListener('click', (event) => {
+        if (!(event.target instanceof Node)) {
+          closeMenu();
+          return;
+        }
+
+        if (!root.contains(event.target)) closeMenu();
+      });
+
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') closeMenu();
+      });
+    }
+
+    closeButtons.forEach((button) => {
+      button.addEventListener('click', () => {
+        if (dialog instanceof HTMLDialogElement) {
+          dialog.close();
+        }
+      });
+    });
+
+    if (dialog instanceof HTMLDialogElement) {
+      dialog.addEventListener('click', (event) => {
+        const rect = dialog.getBoundingClientRect();
+        const inside =
+          rect.top <= event.clientY &&
+          event.clientY <= rect.top + rect.height &&
+          rect.left <= event.clientX &&
+          event.clientX <= rect.left + rect.width;
+
+        if (!inside) {
+          dialog.close();
+        }
+      });
+    }
+
+    if (primaryLink instanceof HTMLAnchorElement) {
+      primaryLink.addEventListener('click', (event) => {
+        if (recommended !== 'macos') return;
+        if (!(dialog instanceof HTMLDialogElement)) return;
+        event.preventDefault();
+        dialog.showModal();
+      });
+    }
+
+    syncLinks();
+    setPrimaryLink(fallbackUrl, recommended === 'unknown' ? 'Download preview' : `Download for ${platformLabels[recommended]}`);
+    setStatus('Loading latest release…');
+
+    fetch(apiUrl, {
+      headers: {
+        Accept: 'application/vnd.github+json',
+      },
+    })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`GitHub release lookup failed with status ${response.status}`);
+        }
+        return response.json();
+      })
+      .then((release) => {
+        const assets = Array.isArray(release.assets) ? release.assets : [];
+        links.macos = assets.find(assetMatchers.macos)?.browser_download_url || fallbackUrl;
+        links.windows = assets.find(assetMatchers.windows)?.browser_download_url || fallbackUrl;
+        links.linux = assets.find(assetMatchers.linux)?.browser_download_url || fallbackUrl;
+        syncLinks();
+
+        const primaryHref = recommended === 'macos'
+          ? links.macos
+          : recommended === 'windows'
+            ? links.windows
+            : recommended === 'linux'
+              ? links.linux
+              : fallbackUrl;
+        const primaryLabel = recommended === 'unknown' ? 'Download preview' : `Download for ${platformLabels[recommended]}`;
+
+        setPrimaryLink(primaryHref, primaryLabel);
+        setStatus(`Latest release ${release.tag_name || 'available'}.`);
+      })
+      .catch(() => {
+        syncLinks();
+        setPrimaryLink(fallbackUrl, recommended === 'unknown' ? 'Download preview' : `Download for ${platformLabels[recommended]}`);
+        setStatus('Using GitHub release links.');
+      });
+  })();
+</script>
 
 <style>
   @media (max-width: 768px) {
