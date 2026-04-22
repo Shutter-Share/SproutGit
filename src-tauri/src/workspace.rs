@@ -244,21 +244,40 @@ fn import_repo_with_mode(
         },
         ImportRepoMode::InPlace => {
             let reserved = ["root", "worktrees", ".sproutgit"];
-            for entry in fs::read_dir(workspace)
+            let entries = fs::read_dir(workspace)
                 .map_err(|e| format!("Failed to inspect repository directory: {e}"))?
-            {
-                let entry = entry.map_err(|e| format!("Failed to inspect repository entry: {e}"))?;
-                let name = entry.file_name();
-                let name_str = name.to_string_lossy();
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| format!("Failed to inspect repository entry: {e}"))?;
 
-                if reserved.iter().any(|r| *r == name_str) {
-                    continue;
-                }
+            let collisions = entries
+                .iter()
+                .filter_map(|entry| {
+                    let name = entry.file_name();
+                    let name_str = name.to_string_lossy();
+                    reserved
+                        .iter()
+                        .any(|reserved_name| *reserved_name == name_str)
+                        .then(|| name_str.into_owned())
+                })
+                .collect::<Vec<_>>();
+
+            if !collisions.is_empty() {
+                return Err(format!(
+                    "Cannot import repository in place: repository contains reserved workspace path(s): {}",
+                    collisions.join(", ")
+                ));
+            }
+
+            for entry in entries {
+                let name = entry.file_name();
 
                 let from = entry.path();
                 let to = root_path.join(name);
                 fs::rename(&from, &to).map_err(|e| {
-                    format!("Failed to move '{}' into workspace root: {e}", from.display())
+                    format!(
+                        "Failed to move '{}' into workspace root: {e}",
+                        from.display()
+                    )
                 })?;
             }
         },
@@ -461,7 +480,10 @@ pub async fn import_git_repo_workspace_with_mode(
     let workspace = match mode {
         ImportRepoMode::InPlace => source_repo.clone(),
         ImportRepoMode::Move | ImportRepoMode::Copy => {
-            let Some(path) = workspace_path.as_deref().map(str::trim).filter(|p| !p.is_empty())
+            let Some(path) = workspace_path
+                .as_deref()
+                .map(str::trim)
+                .filter(|p| !p.is_empty())
             else {
                 return Err("Workspace path is required for move/copy import modes".to_string());
             };
@@ -470,7 +492,9 @@ pub async fn import_git_repo_workspace_with_mode(
     };
 
     if matches!(mode, ImportRepoMode::Move | ImportRepoMode::Copy) && workspace == source_repo {
-        return Err("Workspace path must differ from repository path for move/copy modes".to_string());
+        return Err(
+            "Workspace path must differ from repository path for move/copy modes".to_string(),
+        );
     }
 
     let root_path = workspace.join("root");
