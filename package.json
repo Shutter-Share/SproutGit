@@ -44,20 +44,20 @@
     "monaco-editor": "^0.55.1"
   },
   "devDependencies": {
-    "@sveltejs/adapter-static": "^3.0.6",
-    "@sveltejs/kit": "^2.9.0",
-    "@sveltejs/vite-plugin-svelte": "^5.0.0",
-    "@tailwindcss/vite": "^4.2.2",
+    "@sveltejs/adapter-static": "^3.0.10",
+    "@sveltejs/kit": "^2.57.1",
+    "@sveltejs/vite-plugin-svelte": "^7.0.0",
+    "@tailwindcss/vite": "^4.2.4",
     "@tauri-apps/cli": "^2",
-    "oxlint": "^0.3.0",
+    "oxlint": "^1.61.0",
     "playwright": "^1.59.1",
-    "prettier": "^3.2.5",
-    "prettier-plugin-svelte": "^3.2.2",
-    "svelte": "^5.0.0",
-    "svelte-check": "^4.0.0",
-    "tailwindcss": "^4.2.2",
-    "typescript": "~5.6.2",
-    "vite": "^6.0.3",
+    "prettier": "^3.8.3",
+    "prettier-plugin-svelte": "^3.5.1",
+    "svelte": "^5.55.4",
+    "svelte-check": "^4.4.6",
+    "tailwindcss": "^4.2.4",
+    "typescript": "~6.0.3",
+    "vite": "^8.0.9",
     "webdriverio": "^9.27.0"
   }
 }
