@@ -3,6 +3,7 @@
   import { onMount, onDestroy } from 'svelte';
   import type { Terminal as XTerm } from '@xterm/xterm';
   import type { FitAddon } from '@xterm/addon-fit';
+  import type { WebLinksAddon as WebLinksAddonType } from '@xterm/addon-web-links';
   import type { UnlistenFn } from '@tauri-apps/api/event';
   import {
     spawnTerminal,
@@ -27,6 +28,7 @@
   let containerEl = $state<HTMLDivElement | null>(null);
   let term: XTerm | null = null;
   let fitAddon: FitAddon | null = null;
+  let webLinksAddon: WebLinksAddonType | null = null;
 
   // ── Session state ─────────────────────────────────────────────────────────
   let ptyId = $state<string | null>(null);
@@ -70,6 +72,8 @@
     // Dynamically import xterm so it's not included in the initial bundle
     const { Terminal } = await import('@xterm/xterm');
     const { FitAddon } = await import('@xterm/addon-fit');
+    const { WebLinksAddon } = await import('@xterm/addon-web-links');
+    const { openUrl } = await import('@tauri-apps/plugin-opener');
 
     const options: ConstructorParameters<typeof Terminal>[0] & { windowsMode?: boolean } = {
       theme: THEME,
@@ -87,6 +91,12 @@
 
     fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
+
+    webLinksAddon = new WebLinksAddon((_event, uri) => {
+      void openUrl(uri);
+    });
+    term.loadAddon(webLinksAddon);
+
     term.open(containerEl);
     fitAddon.fit();
 
@@ -157,6 +167,7 @@
     term?.dispose();
     term = null;
     fitAddon = null;
+    webLinksAddon = null;
   }
 
   onMount(() => {
