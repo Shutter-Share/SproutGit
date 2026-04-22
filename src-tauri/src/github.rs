@@ -349,8 +349,15 @@ fn migrate_legacy_token_to_keychain() -> GitHubAuthStorageMigration {
 // ── Commands ──
 
 #[tauri::command]
-pub fn migrate_github_auth_storage() -> GitHubAuthStorageMigration {
-    migrate_legacy_token_to_keychain()
+pub async fn migrate_github_auth_storage() -> GitHubAuthStorageMigration {
+    tokio::task::spawn_blocking(migrate_legacy_token_to_keychain)
+        .await
+        .unwrap_or_else(|_| GitHubAuthStorageMigration {
+            migrated: false,
+            storage_backend: "error".to_string(),
+            had_legacy_file_token: false,
+            error: Some("Migration task failed".to_string()),
+        })
 }
 
 #[tauri::command]
