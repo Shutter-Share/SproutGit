@@ -100,8 +100,10 @@ fn validate_shell_for_terminal(shell: &str) -> Result<String, String> {
 // ── Tauri commands ────────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub fn list_available_shells() -> Vec<String> {
-    detect_available_shells()
+pub async fn list_available_shells() -> Vec<String> {
+    tokio::task::spawn_blocking(detect_available_shells)
+        .await
+        .unwrap_or_default()
 }
 
 /// Spawn a new PTY session running the given shell in the given directory.

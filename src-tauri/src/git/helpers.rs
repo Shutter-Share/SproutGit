@@ -3,8 +3,10 @@ use std::collections::HashSet;
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Command, Output};
 use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 
 /// Strip the `\\?\` extended-length path prefix that Windows `canonicalize()` adds.
 /// Git for Windows cannot handle these prefixed paths correctly.
@@ -107,22 +109,19 @@ impl GitAction {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SystemAction {
-    CommandLookup,
     OpenEditor,
     HookExecute,
 }
 
 impl SystemAction {
     #[cfg(test)]
-    pub const ALL: [SystemAction; 3] = [
-        SystemAction::CommandLookup,
+    pub const ALL: [SystemAction; 2] = [
         SystemAction::OpenEditor,
         SystemAction::HookExecute,
     ];
 
     pub fn label(self) -> &'static str {
         match self {
-            SystemAction::CommandLookup => "command_lookup",
             SystemAction::OpenEditor => "open_editor",
             SystemAction::HookExecute => "hook_execute",
         }
@@ -228,6 +227,9 @@ fn base_git_command() -> Command {
     let mut command = Command::new("git");
     command.env("PATH", augmented_path());
     command.env("GIT_TERMINAL_PROMPT", "0");
+    // Prevent a console window from flashing on Windows for every git call.
+    #[cfg(target_os = "windows")]
+    command.creation_flags(0x08000000); // CREATE_NO_WINDOW
     command
 }
 
@@ -250,46 +252,36 @@ pub fn system_command(action: SystemAction, program: &str, args: &[&str]) -> Com
     command.args(args);
     command.env("PATH", augmented_path());
     command.env("SPROUTGIT_SYSTEM_ACTION", action.label());
+    // Prevent a console window from flashing on Windows for every system call.
+    #[cfg(target_os = "windows")]
+    command.creation_flags(0x08000000); // CREATE_NO_WINDOW
     command
-}
-
-pub fn run_system_command(
-    action: SystemAction,
-    program: &str,
-    args: &[&str],
-    suppress_output: bool,
-) -> Result<Output, String> {
-    let mut command = system_command(action, program, args);
-
-    if suppress_output {
-        command.stdout(Stdio::null());
-        command.stderr(Stdio::null());
-    }
-
-    command
-        .output()
-        .map_err(|e| format!("Failed to run system action '{}': {e}", action.label()))
 }
 
 pub fn command_exists(command: &str) -> bool {
-    if command.trim().is_empty() {
+    let cmd = command.trim();
+    if cmd.is_empty() {
         return false;
     }
 
-    let lookup_program = if cfg!(target_os = "windows") {
-        "where"
-    } else {
-        "which"
-    };
-
-    run_system_command(
-        SystemAction::CommandLookup,
-        lookup_program,
-        &[command],
-        true,
-    )
-    .map(|output| output.status.success())
-    .unwrap_or(false)
+    // Walk PATH directly rather than spawning `which`/`where` for every candidate.
+    // This is significantly faster when checking many editors and tools at once
+    // (e.g. on settings page load) because it avoids subprocess overhead entirely.
+    let path_str = augmented_path();
+    let path_var: OsString = path_str.into();
+    for dir in std::env::split_paths(&path_var) {
+        if dir.join(cmd).is_file() {
+            return true;
+        }
+        // On Windows executables often lack an extension in PATH; probe common ones.
+        #[cfg(target_os = "windows")]
+        for ext in &[".exe", ".cmd", ".bat", ".com"] {
+            if dir.join(format!("{cmd}{ext}")).is_file() {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 pub fn normalize_existing_path(input: &str) -> Result<PathBuf, String> {

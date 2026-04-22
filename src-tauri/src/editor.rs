@@ -353,82 +353,99 @@ pub async fn open_in_editor(worktree_path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn detect_editors() -> Vec<EditorInfo> {
-    known_editors()
-        .into_iter()
-        .map(|editor| {
-            let resolved = resolve_editor(&editor);
-            EditorInfo {
-                id: editor.id.to_string(),
-                name: editor.name.to_string(),
-                command: resolved
-                    .clone()
-                    .unwrap_or_else(|| editor.command.to_string()),
-                installed: resolved.is_some(),
-            }
-        })
-        .collect()
+pub async fn detect_editors() -> Vec<EditorInfo> {
+    tokio::task::spawn_blocking(|| {
+        known_editors()
+            .into_iter()
+            .map(|editor| {
+                let resolved = resolve_editor(&editor);
+                EditorInfo {
+                    id: editor.id.to_string(),
+                    name: editor.name.to_string(),
+                    command: resolved
+                        .clone()
+                        .unwrap_or_else(|| editor.command.to_string()),
+                    installed: resolved.is_some(),
+                }
+            })
+            .collect()
+    })
+    .await
+    .unwrap_or_default()
 }
 
 #[tauri::command]
-pub fn detect_git_tools() -> Vec<GitToolInfo> {
-    known_git_tools()
-        .into_iter()
-        .map(|tool| {
-            let resolved = resolve_git_tool(&tool);
-            GitToolInfo {
-                id: tool.id.to_string(),
-                name: tool.name.to_string(),
-                command: resolved
-                    .clone()
-                    .unwrap_or_else(|| tool.command.to_string()),
-                installed: resolved.is_some(),
-                supports_diff: tool.supports_diff,
-                supports_merge: tool.supports_merge,
-            }
-        })
-        .collect()
+pub async fn detect_git_tools() -> Vec<GitToolInfo> {
+    tokio::task::spawn_blocking(|| {
+        known_git_tools()
+            .into_iter()
+            .map(|tool| {
+                let resolved = resolve_git_tool(&tool);
+                GitToolInfo {
+                    id: tool.id.to_string(),
+                    name: tool.name.to_string(),
+                    command: resolved
+                        .clone()
+                        .unwrap_or_else(|| tool.command.to_string()),
+                    installed: resolved.is_some(),
+                    supports_diff: tool.supports_diff,
+                    supports_merge: tool.supports_merge,
+                }
+            })
+            .collect()
+    })
+    .await
+    .unwrap_or_default()
 }
 
 #[tauri::command]
-pub fn get_git_config(key: String) -> Result<String, String> {
+pub async fn get_git_config(key: String) -> Result<String, String> {
     let key = validate_git_config_key(&key)?;
-    let output = run_git(
-        GitAction::ReadGitConfig,
-        &["config", "--global", "--", &key],
-    )
-    .map_err(|e| format!("Failed to read git config: {e}"))?;
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    } else {
-        Ok(String::new())
-    }
+    tokio::task::spawn_blocking(move || {
+        let output = run_git(
+            GitAction::ReadGitConfig,
+            &["config", "--global", "--", &key],
+        )
+        .map_err(|e| format!("Failed to read git config: {e}"))?;
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        } else {
+            Ok(String::new())
+        }
+    })
+    .await
+    .map_err(|e| format!("Task error: {e}"))?
 }
 
 #[tauri::command]
-pub fn set_git_config(key: String, value: String) -> Result<(), String> {
+pub async fn set_git_config(key: String, value: String) -> Result<(), String> {
     let key = validate_git_config_key(&key)?;
     validate_no_control_chars(value.trim(), "Git config value")?;
+    let value = value.trim().to_string();
 
-    if value.is_empty() {
-        let _ = run_git(
-            GitAction::UnsetGitConfig,
-            &["config", "--global", "--unset", "--", &key],
-        );
-        Ok(())
-    } else {
-        let output = run_git(
-            GitAction::SetGitConfig,
-            &["config", "--global", "--", &key, value.trim()],
-        )
-        .map_err(|e| format!("Failed to set git config: {e}"))?;
-        if output.status.success() {
+    tokio::task::spawn_blocking(move || {
+        if value.is_empty() {
+            let _ = run_git(
+                GitAction::UnsetGitConfig,
+                &["config", "--global", "--unset", "--", &key],
+            );
             Ok(())
         } else {
-            Err(format!(
-                "git config failed: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            ))
+            let output = run_git(
+                GitAction::SetGitConfig,
+                &["config", "--global", "--", &key, &value],
+            )
+            .map_err(|e| format!("Failed to set git config: {e}"))?;
+            if output.status.success() {
+                Ok(())
+            } else {
+                Err(format!(
+                    "git config failed: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                ))
+            }
         }
-    }
+    })
+    .await
+    .map_err(|e| format!("Task error: {e}"))?
 }
