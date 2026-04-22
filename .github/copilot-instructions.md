@@ -265,6 +265,7 @@ When adding or changing **any** git or system interaction, follow all rules belo
 - **System command registry**: Route all git/system process execution through registered helpers (`GitAction` / `SystemAction`) so behavior is auditable and testable.
 - **Cross-platform compatibility**: Assume macOS, Linux, and Windows on every change. Avoid OS-specific shell utilities unless a platform-specific fallback exists.
 - **Path handling**: Use `Path`/`PathBuf` and platform-aware path/env separators. Do not hardcode `:` as PATH separator.
+- **Path serialization — frontend-bound values**: Any `Path`/`PathBuf` value serialised in a Tauri command response (struct fields, `Ok(...)` return values) **must** be converted with `path_to_frontend()` from `crate::git::helpers`, not with `to_string_lossy()`. Git always outputs forward slashes on every OS; using the same convention prevents frontend path-comparison mismatches on Windows. Paths passed as arguments to git/system commands should stay as native OS paths via `to_string_lossy()` directly.
 - **Least privilege and clear errors**: Fail closed on invalid input and return clear, user-safe error messages.
 
 ## Security Testing Requirements

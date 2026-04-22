@@ -2,8 +2,8 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 
 use crate::git::helpers::{
-    ensure_git_success, git_command, normalize_existing_path, run_git, slugify_for_path,
-    validate_non_option_value, GitAction,
+    ensure_git_success, git_command, normalize_existing_path, path_to_frontend, run_git,
+    slugify_for_path, validate_non_option_value, GitAction,
 };
 use crate::hooks::execute_workspace_hooks_for_trigger;
 
@@ -226,7 +226,7 @@ pub async fn list_worktrees(repo_path: String) -> Result<WorktreeListResult, Str
     }
 
     Ok(WorktreeListResult {
-        repo_path: canonical.to_string_lossy().to_string(),
+        repo_path: path_to_frontend(&canonical),
         worktrees,
     })
 }
@@ -275,7 +275,7 @@ pub async fn list_refs(repo_path: String) -> Result<RefsResult, String> {
         .collect();
 
     Ok(RefsResult {
-        repo_path: canonical.to_string_lossy().to_string(),
+        repo_path: path_to_frontend(&canonical),
         refs,
     })
 }
@@ -344,7 +344,7 @@ pub async fn get_commit_graph(
         .collect();
 
     Ok(CommitGraphResult {
-        repo_path: canonical.to_string_lossy().to_string(),
+        repo_path: path_to_frontend(&canonical),
         commits,
     })
 }
@@ -423,7 +423,7 @@ pub async fn create_managed_worktree(
     }
 
     Ok(CreateWorktreeResult {
-        worktree_path: target_worktree.to_string_lossy().to_string(),
+        worktree_path: path_to_frontend(&target_worktree),
         branch,
         from_ref: ref_name,
     })
@@ -487,7 +487,7 @@ pub async fn delete_managed_worktree(
         .await;
     }
 
-    Ok(wt_path.to_string_lossy().to_string())
+    Ok(path_to_frontend(&wt_path))
 }
 
 #[tauri::command]

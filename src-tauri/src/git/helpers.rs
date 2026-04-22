@@ -17,6 +17,20 @@ fn strip_win_prefix(p: PathBuf) -> PathBuf {
     p
 }
 
+/// Convert a `Path` to a forward-slash string for consistent cross-platform
+/// representation in data returned to the frontend.
+///
+/// Git tools always output forward slashes even on Windows.  All path values
+/// serialised in Tauri command responses must use this function so that
+/// frontend comparisons against git-reported paths work correctly on every OS.
+///
+/// **Only use this for values that go to the frontend.**
+/// Paths passed as arguments to git/system commands must stay as native OS
+/// paths and should use `to_string_lossy()` directly.
+pub fn path_to_frontend(p: &Path) -> String {
+    p.to_string_lossy().replace('\\', "/")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GitAction {
     GitInfo,
@@ -523,9 +537,10 @@ impl GitCache {
 mod tests {
     use super::{
         validate_git_config_key, validate_no_control_chars, validate_non_option_value,
-        validate_repo_url, ensure_git_success, slugify_for_path, CachedValue, GitAction,
-        GitCache, SystemAction,
+        validate_repo_url, ensure_git_success, slugify_for_path, path_to_frontend,
+        CachedValue, GitAction, GitCache, SystemAction,
     };
+    use std::path::Path;
 
     #[test]
     fn registered_git_actions_are_unique() {
@@ -709,5 +724,29 @@ mod tests {
         cache.invalidate();
         // After invalidation, timestamp 1 should be too old
         assert!(!cache.is_valid(1));
+    }
+
+    // ── path_to_frontend ──
+
+    #[test]
+    fn path_to_frontend_unix_path_unchanged() {
+        let p = Path::new("/home/user/project/root");
+        assert_eq!(path_to_frontend(p), "/home/user/project/root");
+    }
+
+    #[test]
+    fn path_to_frontend_converts_backslashes_to_forward() {
+        // Simulate a Windows-style path (construct manually so tests pass on all platforms).
+        let p = Path::new("C:\\Users\\user\\project\\root");
+        let result = path_to_frontend(p);
+        assert!(!result.contains('\\'), "result still contains backslash: {result}");
+        assert_eq!(result, "C:/Users/user/project/root");
+    }
+
+    #[test]
+    fn path_to_frontend_mixed_separators_fully_normalized() {
+        let p = Path::new("C:/Users\\user/project\\root");
+        let result = path_to_frontend(p);
+        assert!(!result.contains('\\'), "result still contains backslash: {result}");
     }
 }

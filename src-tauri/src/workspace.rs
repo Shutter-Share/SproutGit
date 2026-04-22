@@ -8,7 +8,7 @@ use std::process::Stdio;
 use crate::db::initialize_workspace_db;
 use crate::git::helpers::{
     ensure_directory, git_command, normalize_existing_path, normalize_or_create_dir,
-    now_epoch_seconds, validate_repo_url, GitAction,
+    now_epoch_seconds, path_to_frontend, validate_repo_url, GitAction,
 };
 use crate::github::git_clone_auth_context;
 
@@ -22,10 +22,10 @@ fn write_project_marker(
     let marker = json!({
         "projectVersion": 1,
         "createdAt": now_epoch_seconds(),
-        "workspacePath": workspace.to_string_lossy(),
-        "rootPath": root_path.to_string_lossy(),
-        "worktreesPath": worktrees_path.to_string_lossy(),
-        "stateDbPath": state_db_path.to_string_lossy(),
+        "workspacePath": path_to_frontend(workspace),
+        "rootPath": path_to_frontend(root_path),
+        "worktreesPath": path_to_frontend(worktrees_path),
+        "stateDbPath": path_to_frontend(state_db_path),
     });
 
     let marker_pretty = serde_json::to_string_pretty(&marker)
@@ -142,11 +142,11 @@ fn finalize_workspace(
     }
 
     Ok(WorkspaceInitResult {
-        workspace_path: workspace.to_string_lossy().to_string(),
-        root_path: root_path.to_string_lossy().to_string(),
-        worktrees_path: worktrees_path.to_string_lossy().to_string(),
-        metadata_path: metadata_path.to_string_lossy().to_string(),
-        state_db_path: state_db_path.to_string_lossy().to_string(),
+        workspace_path: path_to_frontend(workspace),
+        root_path: path_to_frontend(root_path),
+        worktrees_path: path_to_frontend(worktrees_path),
+        metadata_path: path_to_frontend(metadata_path),
+        state_db_path: path_to_frontend(state_db_path),
         cloned,
     })
 }
@@ -534,11 +534,11 @@ pub async fn create_sproutgit_workspace(
     crate::recent_docs::add_to_recent_documents(&workspace, &app_handle);
 
     Ok(WorkspaceInitResult {
-        workspace_path: workspace.to_string_lossy().to_string(),
-        root_path: root_path.to_string_lossy().to_string(),
-        worktrees_path: worktrees_path.to_string_lossy().to_string(),
-        metadata_path: metadata_path.to_string_lossy().to_string(),
-        state_db_path: state_db_path.to_string_lossy().to_string(),
+        workspace_path: path_to_frontend(&workspace),
+        root_path: path_to_frontend(&root_path),
+        worktrees_path: path_to_frontend(&worktrees_path),
+        metadata_path: path_to_frontend(&metadata_path),
+        state_db_path: path_to_frontend(&state_db_path),
         cloned,
     })
 }
@@ -649,11 +649,11 @@ pub async fn inspect_sproutgit_workspace(
     }
 
     let status = WorkspaceStatus {
-        workspace_path: workspace.to_string_lossy().to_string(),
-        root_path: root_path.to_string_lossy().to_string(),
-        worktrees_path: worktrees_path.to_string_lossy().to_string(),
-        metadata_path: metadata_path.to_string_lossy().to_string(),
-        state_db_path: state_db_path.to_string_lossy().to_string(),
+        workspace_path: path_to_frontend(&workspace),
+        root_path: path_to_frontend(&root_path),
+        worktrees_path: path_to_frontend(&worktrees_path),
+        metadata_path: path_to_frontend(&metadata_path),
+        state_db_path: path_to_frontend(&state_db_path),
         is_sproutgit_project: project_marker_path.exists() || layout_exists,
         root_exists,
         worktrees_exists,
