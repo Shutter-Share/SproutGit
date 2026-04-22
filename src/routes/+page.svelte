@@ -378,7 +378,7 @@
 
     importing = true;
     importProgressMsg = '';
-    let unlistenImport: (() => void) | null = null;
+    let unlistenImport: (() => void) | undefined;
 
     try {
       unlistenImport = await onImportProgress(msg => {
