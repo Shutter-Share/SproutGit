@@ -35,9 +35,11 @@ pub fn add_to_recent_documents(path: &std::path::Path, app_handle: &tauri::AppHa
 #[cfg(target_os = "windows")]
 #[allow(unsafe_code)] // Windows shell/COM APIs require FFI calls.
 fn add_to_recent_documents_windows(path: &std::path::Path, app_id: &str) {
-    use windows::core::{HSTRING, PCWSTR};
+    use windows::core::{Result as WinResult, HSTRING, PCWSTR};
     use windows::Win32::Foundation::RPC_E_CHANGED_MODE;
-    use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
+    use windows::Win32::System::Com::{
+        CoInitializeEx, CoUninitialize, IBindCtx, COINIT_APARTMENTTHREADED,
+    };
     use windows::Win32::UI::Shell::{
         IShellItem, SHAddToRecentDocs, SHCreateItemFromParsingName, SHARDAPPIDINFO,
         SHARD_APPIDINFO, SHARD_PATHW,
@@ -46,17 +48,16 @@ fn add_to_recent_documents_windows(path: &std::path::Path, app_id: &str) {
     let path_hstring = HSTRING::from(path.to_string_lossy().as_ref());
     let app_id_hstring = HSTRING::from(app_id);
 
-    let mut com_initialized = false;
-    if let Err(err) = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) } {
-        if err.code() != RPC_E_CHANGED_MODE {
-            return;
-        }
-    } else {
-        com_initialized = true;
+    let coinit_result = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+    if coinit_result.is_err() && coinit_result != RPC_E_CHANGED_MODE {
+        return;
     }
+    let com_initialized = coinit_result.is_ok();
 
     let mut added = false;
-    if let Ok(item) = unsafe { SHCreateItemFromParsingName::<IShellItem>(&path_hstring, None) } {
+    let item_result: WinResult<IShellItem> =
+        unsafe { SHCreateItemFromParsingName(&path_hstring, None::<&IBindCtx>) };
+    if let Ok(item) = item_result {
         let info = SHARDAPPIDINFO {
             pszAppID: PCWSTR::from_raw(app_id_hstring.as_ptr()),
             psi: std::mem::ManuallyDrop::new(Some(item)),
