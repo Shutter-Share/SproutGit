@@ -307,7 +307,9 @@ pub(crate) fn import_repo_filesystem(
                         &mut copied,
                         total,
                         &|n, t| {
-                            if let Some(pct) = (n * 100).checked_div(t) {
+                            if let Some(pct) =
+                                n.checked_mul(100).and_then(|value| value.checked_div(t))
+                            {
                                 progress(&format!("Copying files\u{2026} {pct}% ({n} of {t})"));
                             }
                         },
@@ -333,7 +335,9 @@ pub(crate) fn import_repo_filesystem(
                                 &mut copied,
                                 total,
                                 &|n, t| {
-                                    if let Some(pct) = (n * 100).checked_div(t) {
+                                    if let Some(pct) =
+                                        n.checked_mul(100).and_then(|value| value.checked_div(t))
+                                    {
                                         progress(&format!(
                                             "Copying files\u{2026} {pct}% ({n} of {t})"
                                         ));
