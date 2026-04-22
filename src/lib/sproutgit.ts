@@ -190,11 +190,28 @@ export type GitHubRepo = {
   description?: string | null;
 };
 
+export type GitHubEmailSuggestion = {
+  label: string;
+  email: string;
+  kind: string;
+  primary: boolean;
+  verified: boolean;
+};
+
 export type EditorInfo = {
   id: string;
   name: string;
   command: string;
   installed: boolean;
+};
+
+export type GitToolInfo = {
+  id: string;
+  name: string;
+  command: string;
+  installed: boolean;
+  supportsDiff: boolean;
+  supportsMerge: boolean;
 };
 
 export const getGitInfo = () => invoke<GitInfo>('git_info');
@@ -209,6 +226,19 @@ export const importGitRepoWorkspace = (workspacePath: string, sourceRepoPath: st
   invoke<WorkspaceInitResult>('import_git_repo_workspace', {
     workspacePath,
     sourceRepoPath,
+  });
+
+export type ImportRepoMode = 'inPlace' | 'move' | 'copy';
+
+export const importGitRepoWorkspaceWithMode = (
+  sourceRepoPath: string,
+  mode: ImportRepoMode,
+  workspacePath?: string | null
+) =>
+  invoke<WorkspaceInitResult>('import_git_repo_workspace_with_mode', {
+    sourceRepoPath,
+    mode,
+    workspacePath: workspacePath?.trim() ? workspacePath : null,
   });
 
 export const inspectWorkspace = (workspacePath: string) =>
@@ -241,6 +271,9 @@ export const getCommitGraph = (repoPath: string, limit?: number | null, skip?: n
     limit: limit ?? null,
     skip: skip ?? null,
   });
+
+export const countCommits = (repoPath: string) =>
+  invoke<number>('count_commits', { repoPath });
 
 export const createManagedWorktree = (
   rootRepoPath: string,
@@ -361,9 +394,14 @@ export const githubLogout = () => invoke<void>('github_logout');
 
 export const listGithubRepos = () => invoke<GitHubRepo[]>('list_github_repos');
 
+export const listGithubEmailSuggestions = () =>
+  invoke<GitHubEmailSuggestion[]>('list_github_email_suggestions');
+
 export const getHomeDir = () => invoke<string>('get_home_dir');
 
 export const detectEditors = () => invoke<EditorInfo[]>('detect_editors');
+
+export const detectGitTools = () => invoke<GitToolInfo[]>('detect_git_tools');
 
 export const getGitConfig = (key: string) => invoke<string>('get_git_config', { key });
 

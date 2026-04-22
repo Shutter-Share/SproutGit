@@ -15,6 +15,7 @@
     createManagedWorktree,
     deleteManagedWorktree,
     getCommitGraph,
+    countCommits,
     getDiffContent,
     getDiffFiles,
     inspectWorkspace,
@@ -72,6 +73,7 @@
   let graphSkip = $state(0);
   let graphHasMore = $state(false);
   let graphLoadingMore = $state(false);
+  let totalCommitCount = $state<number | null>(null);
   let graphSeenHashes = new Set<string>();
   let graphGeneration = 0;
   let loading = $state(true);
@@ -792,6 +794,14 @@
       initializeGraphState(graphData);
       selectedRef = refsData.refs[0]?.name ?? "HEAD";
 
+      if (graphHasMore) {
+        // Fetch total commit count in the background only when the first page is partial.
+        totalCommitCount = null;
+        countCommits(status.rootPath).then((n) => { totalCommitCount = n; }).catch(() => {});
+      } else {
+        totalCommitCount = graphData.commits.length;
+      }
+
       // Restore the previously active worktree if still valid (survives HMR).
       const savedWt = sessionStorage.getItem("sg_active_wt");
       if (savedWt && worktreeData.worktrees.some((wt) => wt.path === savedWt)) {
@@ -1034,6 +1044,13 @@
     worktrees = refreshedWt.worktrees;
     initializeGraphState(refreshedGraph);
     refs = refreshedRefs.refs;
+    if (graphHasMore) {
+      // Refresh total commit count in the background only when the graph is partial.
+      totalCommitCount = null;
+      countCommits(workspace.rootPath).then((n) => { totalCommitCount = n; }).catch(() => {});
+    } else {
+      totalCommitCount = refreshedGraph.commits.length;
+    }
     // Refresh change counts for all non-root worktrees
     const nonRoot = refreshedWt.worktrees
       .filter((wt) => wt.path !== workspace!.rootPath)
@@ -1302,7 +1319,7 @@
               ? `/settings?workspace=${encodeURIComponent(workspace.workspacePath)}`
               : "/settings",
           )}
-        class="rounded p-1 text-[var(--sg-text-faint)] hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text)]"
+        class="rounded-full p-1 text-[var(--sg-text-faint)] hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text)]"
         title="Settings"
       >
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -1754,7 +1771,15 @@
                   </span>
                 {/if}
               </div>
-              <span class="text-[10px] text-[var(--sg-text-faint)]">{graph?.commits.length ?? 0} commits</span>
+              <span class="text-[10px] text-[var(--sg-text-faint)]">
+                {#if graphHasMore && totalCommitCount !== null}
+                  Showing {(graph?.commits.length ?? 0).toLocaleString()} of {totalCommitCount.toLocaleString()} commits
+                {:else if graphHasMore}
+                  {(graph?.commits.length ?? 0).toLocaleString()}+ commits
+                {:else}
+                  {(graph?.commits.length ?? 0).toLocaleString()} commits
+                {/if}
+              </span>
             </div>
 
             <div class="flex flex-1 flex-col overflow-hidden bg-[var(--sg-bg)]">
