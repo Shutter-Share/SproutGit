@@ -35,6 +35,8 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
+        env:
+          SPROUTGIT_SKIP_PLAYWRIGHT_SETUP: "1"
       - run: pnpm run check
       - run: pnpm run build
 
@@ -113,6 +115,8 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xvfb
 
       - run: pnpm install --frozen-lockfile
+        env:
+          SPROUTGIT_SKIP_PLAYWRIGHT_SETUP: "1"
 
       - name: Install Playwright browsers (Linux/macOS)
         if: runner.os != 'Windows'
