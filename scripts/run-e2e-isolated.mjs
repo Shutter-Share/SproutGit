@@ -97,6 +97,7 @@ function runSingleTest(file, fullTitle) {
     env: {
       ...process.env,
       SPROUTGIT_E2E_HEADED: tauriHeaded ? '1' : '0',
+      SPROUTGIT_E2E_SKIP_BUILD: '1',
       // Keep a stable suite seed/config path to avoid forcing Tauri rebuild work per test.
       PW_PORT_SEED: suiteSeed,
       SPROUTGIT_E2E_TAURI_CONFIG_PATH: suiteConfigPath,
