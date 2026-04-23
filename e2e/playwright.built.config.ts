@@ -20,9 +20,7 @@ function parseSafePort(raw: string | undefined): number | null {
 }
 
 async function isPortAvailable(port: number): Promise<boolean> {
-  if (port < MIN_TEST_PORT || port > 65_535) {
-    return false;
-  }
+  if (port < MIN_TEST_PORT || port > 65_535) return false;
 
   return new Promise(resolveAvailability => {
     const server = createServer();
@@ -42,15 +40,17 @@ async function findOpenPort(startPort: number): Promise<number> {
       return candidate;
     }
   }
+
   throw new Error(`Could not find an open port in safe range starting at ${startPort}`);
 }
 
-const inheritedDevPort = parseSafePort(process.env.SPROUTGIT_E2E_DEV_PORT);
 const inheritedPluginPort = parseSafePort(process.env.SPROUTGIT_PLAYWRIGHT_TCP_PORT);
 const inheritedSocketPath = process.env.SPROUTGIT_PLAYWRIGHT_SOCKET_PATH;
+const inheritedDevPort = parseSafePort(process.env.SPROUTGIT_E2E_DEV_PORT);
+
 const hasInheritedRuntime =
-  typeof inheritedDevPort === 'number' &&
   typeof inheritedPluginPort === 'number' &&
+  typeof inheritedDevPort === 'number' &&
   typeof inheritedSocketPath === 'string' &&
   inheritedSocketPath.length > 0;
 
@@ -60,7 +60,6 @@ const PLUGIN_PORT_BASE = 22000 + (PORT_SEED % 2000);
 
 const devPort = hasInheritedRuntime ? inheritedDevPort : await findOpenPort(DEV_PORT_BASE);
 const pluginPort = hasInheritedRuntime ? inheritedPluginPort : await findOpenPort(PLUGIN_PORT_BASE);
-const devUrl = `http://${DEV_HOST}:${devPort}`;
 const socketPath =
   hasInheritedRuntime && inheritedSocketPath
     ? inheritedSocketPath
@@ -69,16 +68,16 @@ const socketPath =
 const runId = `${process.pid}-${Date.now()}`;
 const e2eRunsBaseDir = resolve(ROOT, 'tmp', 'e2e-runs');
 
-// Clean up all previous runs before starting this one (keep last run on disk after each run).
 try {
   const existingRuns = readdirSync(e2eRunsBaseDir)
     .map(name => ({ name, mtime: statSync(resolve(e2eRunsBaseDir, name)).mtime.getTime() }))
     .sort((a, b) => a.mtime - b.mtime);
+
   for (const run of existingRuns) {
     rmSync(resolve(e2eRunsBaseDir, run.name), { recursive: true, force: true });
   }
 } catch {
-  // Ignore — runs dir may not exist yet.
+  // Ignore when run directory does not exist yet.
 }
 
 const e2eRunDir = resolve(e2eRunsBaseDir, runId);
@@ -93,12 +92,10 @@ process.env.SPROUTGIT_PLAYWRIGHT_TCP_PORT = String(pluginPort);
 process.env.SPROUTGIT_PLAYWRIGHT_SOCKET_PATH = socketPath;
 process.env.SPROUTGIT_CONFIG_DB_PATH = e2eConfigDbPath;
 process.env.SPROUTGIT_E2E_TEST_DIR = e2eTestDir;
-process.env.SPROUTGIT_E2E_TAURI_CWD = ROOT;
 const headedViaEnv = process.env.SPROUTGIT_E2E_HEADED === '1';
 
 export default defineConfig({
   testDir: join(HERE, 'specs'),
-  globalSetup: join(HERE, 'global.setup.mjs'),
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: 0,
