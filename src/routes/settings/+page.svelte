@@ -77,10 +77,10 @@
   let editingDiffTool = $state(false);
   let editingMergeTool = $state(false);
 
-  let installedEditors = $derived(editors.filter((e) => e.installed));
-  let unavailableEditors = $derived(editors.filter((e) => !e.installed));
-  let installedDiffTools = $derived(gitTools.filter((t) => t.installed && t.supportsDiff));
-  let installedMergeTools = $derived(gitTools.filter((t) => t.installed && t.supportsMerge));
+  const installedEditors = $derived(editors.filter((e) => e.installed));
+  const unavailableEditors = $derived(editors.filter((e) => !e.installed));
+  const installedDiffTools = $derived(gitTools.filter((t) => t.installed && t.supportsDiff));
+  const installedMergeTools = $derived(gitTools.filter((t) => t.installed && t.supportsMerge));
 
   type ToolDisplay = {
     id: string;
@@ -126,9 +126,9 @@
     return fallbackDisplay(value);
   }
 
-  let editorDisplay = $derived(findEditorDisplay(currentEditor));
-  let diffToolDisplay = $derived(findToolDisplay(currentDiffTool));
-  let mergeToolDisplay = $derived(findToolDisplay(currentMergeTool));
+  const editorDisplay = $derived(findEditorDisplay(currentEditor));
+  const diffToolDisplay = $derived(findToolDisplay(currentDiffTool));
+  const mergeToolDisplay = $derived(findToolDisplay(currentMergeTool));
 
   getVersion().then((v) => (appVersion = import.meta.env.DEV ? 'dev build' : v)).catch(() => (appVersion = 'unknown'));
   getGitInfo()

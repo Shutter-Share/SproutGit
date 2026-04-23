@@ -42,7 +42,6 @@
 
   const PROJECTS_FOLDER_SETTING_KEY = 'projectsFolder';
   const STARTUP_GIT_TIMEOUT_MS = 3_000;
-  const E2E_RUN_ID = import.meta.env.VITE_SPROUTGIT_E2E_RUN_ID as string | undefined;
 
   let gitChecked = $state(false);
   let git = $state<GitInfo>({ installed: false, version: null });
@@ -82,11 +81,11 @@
   let cloneReturnFocus = $state<HTMLElement | null>(null);
   let importReturnFocus = $state<HTMLElement | null>(null);
 
-  let workspacePath = $derived(
+  const workspacePath = $derived(
     projectsFolder && folderName ? `${projectsFolder}/${folderName}` : ''
   );
 
-  let importWorkspacePath = $derived(
+  const importWorkspacePath = $derived(
     projectsFolder && importFolderName ? `${projectsFolder}/${importFolderName}` : ''
   );
 
@@ -571,12 +570,7 @@
     }
   }
 
-  if (E2E_RUN_ID) {
-    git = { installed: true, version: null };
-    gitChecked = true;
-  } else {
-    checkGitStartup();
-  }
+  checkGitStartup();
 
   getVersion()
     .then(v => (appVersion = import.meta.env.DEV ? 'dev build' : v))
