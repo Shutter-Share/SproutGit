@@ -94,10 +94,15 @@ function dailyAfterCreateHook() {
     return {
       shell: 'powershell',
       script: [
-        "$outputDir = Join-Path $env:SPROUTGIT_WORKSPACE_PATH '.sproutgit/hook-output'",
+        '$workspacePath = $env:SPROUTGIT_WORKSPACE_PATH',
+        'if (-not $workspacePath) {',
+        '  $worktreePath = $env:SPROUTGIT_WORKTREE_PATH',
+        '  $workspacePath = Split-Path -Parent (Split-Path -Parent $worktreePath)',
+        '}',
+        "$outputDir = Join-Path $workspacePath '.sproutgit/hook-output'",
         "New-Item -ItemType Directory -Force -Path $outputDir | Out-Null",
         "$outputFile = Join-Path $outputDir 'after-create.txt'",
-        'Set-Content -Path $outputFile -Value "$env:SPROUTGIT_TRIGGER|$env:SPROUTGIT_WORKTREE_BRANCH|$env:SPROUTGIT_WORKTREE_PATH"',
+        'Set-Content -Path $outputFile -Encoding UTF8 -Value "$env:SPROUTGIT_TRIGGER|$env:SPROUTGIT_WORKTREE_BRANCH|$env:SPROUTGIT_WORKTREE_PATH"',
       ].join('\n'),
     };
   }
