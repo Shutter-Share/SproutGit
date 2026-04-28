@@ -389,7 +389,7 @@ jobs:
         if: runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
-          name: SproutGit-macos
+          name: SproutGit-macos-${{ runner.arch }}
           path: |
             src-tauri/target/release/bundle/macos/*.app.tar.gz
             src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
@@ -471,17 +471,28 @@ jobs:
           WIN_SIG=$(cat "${WIN_MSI}.sig")
           WIN_FILENAME=$(basename "$WIN_MSI")
 
-          MAC_APP=$(find_required_artifact "artifacts/SproutGit-macos" "*.app.tar.gz" "macOS updater")
+          MAC_DIR=$(find artifacts -maxdepth 1 -type d -name "SproutGit-macos-*" | head -n 1)
+          if [[ -z "$MAC_DIR" ]]; then
+            echo "::error::Missing macOS artifact directory. Expected one matching 'artifacts/SproutGit-macos-*'."
+            exit 1
+          fi
+
+          MAC_APP=$(find_required_artifact "$MAC_DIR" "*.app.tar.gz" "macOS updater")
           MAC_SIG=$(cat "${MAC_APP}.sig")
           MAC_FILENAME=$(basename "$MAC_APP")
+          MAC_DIRNAME=$(basename "$MAC_DIR")
 
           MAC_PLATFORM=""
           if [[ "$MAC_FILENAME" == *"aarch64"* ]]; then
             MAC_PLATFORM="darwin-aarch64"
           elif [[ "$MAC_FILENAME" == *"x64"* ]] || [[ "$MAC_FILENAME" == *"x86_64"* ]]; then
             MAC_PLATFORM="darwin-x86_64"
+          elif [[ "$MAC_DIRNAME" == *"ARM64"* ]]; then
+            MAC_PLATFORM="darwin-aarch64"
+          elif [[ "$MAC_DIRNAME" == *"X64"* ]]; then
+            MAC_PLATFORM="darwin-x86_64"
           else
-            echo "::error::Could not infer macOS architecture from updater artifact: '${MAC_FILENAME}'."
+            echo "::error::Could not infer macOS architecture from updater artifact '${MAC_FILENAME}' in directory '${MAC_DIRNAME}'."
             exit 1
           fi
 
@@ -600,5 +611,7 @@ jobs:
             artifacts/SproutGit-linux/*.AppImage.sig
             artifacts/SproutGit-windows/*.msi
             artifacts/SproutGit-windows/*.msi.sig
-            artifacts/SproutGit-macos/*.dmg
+            artifacts/SproutGit-macos-*/*.app.tar.gz
+            artifacts/SproutGit-macos-*/*.app.tar.gz.sig
+            artifacts/SproutGit-macos-*/*.dmg
             latest.json
