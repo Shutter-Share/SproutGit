@@ -11,16 +11,16 @@ Open-source, cross-platform Git desktop app with a **worktree-first** workflow. 
 
 ## Tech Stack
 
-| Layer | Technology | Notes |
-|-------|-----------|-------|
-| Desktop shell | **Tauri v2** | Rust backend, webview frontend |
-| Frontend framework | **SvelteKit + Svelte 5** | SSR disabled (`ssr = false`), `adapter-static` for SPA |
-| Language | **TypeScript** (frontend), **Rust** (backend) | |
-| Styling | **Tailwind CSS v4** | via `@tailwindcss/vite` plugin |
-| State (frontend) | Svelte 5 runes | `$state`, `$derived`, `$derived.by`, `$props`, `$effect` |
-| State (persistent) | **SQLite** via `rusqlite` (bundled) + `rusqlite_migration` | workspace `state.db` + app-global `config.db` |
-| Package manager | **pnpm** | Tauri hooks use `pnpm run dev` / `pnpm run build` |
-| Git integration | CLI-based | Rust backend shells out to `git` via `std::process::Command` |
+| Layer              | Technology                                                 | Notes                                                        |
+| ------------------ | ---------------------------------------------------------- | ------------------------------------------------------------ |
+| Desktop shell      | **Tauri v2**                                               | Rust backend, webview frontend                               |
+| Frontend framework | **SvelteKit + Svelte 5**                                   | SSR disabled (`ssr = false`), `adapter-static` for SPA       |
+| Language           | **TypeScript** (frontend), **Rust** (backend)              |                                                              |
+| Styling            | **Tailwind CSS v4**                                        | via `@tailwindcss/vite` plugin                               |
+| State (frontend)   | Svelte 5 runes                                             | `$state`, `$derived`, `$derived.by`, `$props`, `$effect`     |
+| State (persistent) | **SQLite** via `rusqlite` (bundled) + `rusqlite_migration` | workspace `state.db` + app-global `config.db`                |
+| Package manager    | **pnpm**                                                   | Tauri hooks use `pnpm run dev` / `pnpm run build`            |
+| Git integration    | CLI-based                                                  | Rust backend shells out to `git` via `std::process::Command` |
 
 ## Project Structure
 
@@ -86,6 +86,7 @@ Agent requirements:
 When working on `e2e/**`, adapter fixtures, or Playwright/Tauri bridge behavior, read `docs/tauri-playwright-adapter-cheatsheet.md` before editing.
 
 Key reminders:
+
 - `TauriPage` is Playwright-like but not identical to `Page`.
 - `TauriLocator.waitFor` expects a numeric timeout, not a Playwright options object.
 - Keep plugin socket/port values consistent across setup/launch and worker processes for each run.
@@ -210,6 +211,7 @@ CSS custom properties with auto dark mode:
 Always use `var(--sg-*)` tokens in components. Never hardcode colors outside of `app.css`.
 
 **Light and dark mode are both required.** Every component and UI surface must look correct in both. When designing or editing any UI:
+
 - Use only `var(--sg-*)` tokens — never hardcode hex colors in components.
 - Mentally verify the design in both light mode (`--sg-bg: #f5f5f5`, `--sg-text: #1e1e2e`) and dark mode (`--sg-bg: #1e1e2e`, `--sg-text: #cdd6f4`).
 - Components that use Canvas or WebGL rendering (e.g. xterm.js terminals) require explicit theme objects for both modes — detect `window.matchMedia('(prefers-color-scheme: dark)').matches` at init time and apply the correct theme.
@@ -229,22 +231,27 @@ Always use `var(--sg-*)` tokens in components. Never hardcode colors outside of 
 ## UI Components
 
 ### Toast System (`toast.svelte.ts` + `ToastContainer.svelte`)
+
 - **State module**: `toast.svelte.ts` exports `toast.info()`, `toast.success()`, `toast.error()`, `toast.warning()`. Uses `$state` (no Svelte stores). Auto-dismiss after 4s by default.
 - **Renderer**: `ToastContainer.svelte` mounted in `+layout.svelte`. Fixed top-right, slide-in/out animations, close button.
 
 ### Autocomplete (`Autocomplete.svelte`)
+
 - Filterable dropdown with `items: {label, value, detail?}[]`. Supports keyboard nav (up/down/enter/escape), click outside to close.
 - Two-way binding via `bind:value`. `onselect` callback. ARIA combobox role.
 - Used for source branch selection in the workspace sidebar.
 
 ### Context Menu (`ContextMenu.svelte`)
+
 - `items: MenuItem[]` with `{label, action, icon?, danger?}` or `{separator: true}`.
 - Auto-adjusts position to stay within viewport bounds. Closes on click outside or Escape.
 
 ### Spinner (`Spinner.svelte`)
+
 - Sizes: `sm`, `md`, `lg`. Optional `label` text. Uses `--sg-primary` color.
 
 ### Form Controls (`Checkbox.svelte` + `Select.svelte`)
+
 - Use shared form controls from `src/lib/components/` instead of ad-hoc checkbox/select markup in feature components.
 - `Checkbox.svelte` is the source of truth for custom checkbox visuals and spacing behavior. Keep checked/unchecked icon rendering layout-stable to avoid row height shifts.
 - `Select.svelte` is the source of truth for themed dropdowns. Prefer it over native `<select>` styling repeated inline.
@@ -255,10 +262,10 @@ SproutGit uses two SQLite databases, each with its own versioned migration set.
 
 ### Two databases
 
-| Database | Path | Purpose |
-|----------|------|---------|
-| **Workspace DB** | `<workspace>/.sproutgit/state.db` | Per-project state: meta, hook definitions, hook runs, worktree sessions |
-| **Config DB** | OS app-data dir (`~/Library/Application Support/SproutGit/config.db` on macOS) | App-global settings and recent workspace list |
+| Database         | Path                                                                           | Purpose                                                                 |
+| ---------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
+| **Workspace DB** | `<workspace>/.sproutgit/state.db`                                              | Per-project state: meta, hook definitions, hook runs, worktree sessions |
+| **Config DB**    | OS app-data dir (`~/Library/Application Support/SproutGit/config.db` on macOS) | App-global settings and recent workspace list                           |
 
 A SproutGit workspace is identified by the presence of `state.db` (not a `project.json` — that file no longer exists).
 
@@ -267,6 +274,7 @@ A SproutGit workspace is identified by the presence of `state.db` (not a `projec
 Migrations are plain `.sql` files embedded at compile time via `include_str!` and applied by `rusqlite_migration` on every database open. Version state is tracked automatically in a `__migrations` table that the library manages.
 
 **File layout:**
+
 ```
 src-tauri/migrations/
   workspace/
@@ -277,6 +285,7 @@ src-tauri/migrations/
 ```
 
 **How migrations are registered (`src-tauri/src/db.rs`):**
+
 ```rust
 static WORKSPACE_MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
     Migrations::new(vec![
@@ -287,6 +296,7 @@ static WORKSPACE_MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
 ```
 
 **Rules:**
+
 - Never modify an already-shipped migration file. Add a new numbered file instead.
 - Append the new `M::up(include_str!("../migrations/<db>/<NNN>_….sql"))` entry to the correct `LazyLock` vec.
 - Indexes that reference a column added in the same migration must appear after that `ALTER TABLE` in the same file, or in a later migration file.
@@ -307,6 +317,7 @@ static WORKSPACE_MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
 ## Animations
 
 Global keyframes defined in `app.css`:
+
 - `sg-fade-in` — content entrance (opacity + translateY)
 - `sg-slide-up` / `sg-slide-down` — directional slide entrances
 - `sg-toast-in` / `sg-toast-out` — toast slide from right
@@ -351,16 +362,19 @@ pnpm run tauri dev
 ## Linting & Code Quality
 
 **Rust:**
+
 - **Clippy** — Configured in `src-tauri/Cargo.toml` with `[lints]` section. Enforces security, correctness, complexity checks.
 - **rustfmt** — Configuration in `rustfmt.toml`. Max width 100 chars, consistent style.
 - **Convenience alias** — `cd src-tauri && cargo lint` runs clippy with `-D warnings`.
 
 **Frontend (TypeScript + Svelte):**
+
 - **oxlint** — Fast Rust-based linter configured in `.oxlintrc.json`. Checks security, best practices, unused variables.
 - **Prettier** — Configured in `.prettierrc`. Print width 100, 2-space tabs, single quotes, Svelte support via plugin.
 - **Before commit** — Run `pnpm run lint:fix && pnpm run format` to auto-fix issues.
 
 **CI Integration:**
+
 - All linters run in GitHub Actions on every push (see `.github/workflows/`)
 - Linting failures block PR merge
 - Format violations reported as annotations on PR
@@ -370,6 +384,7 @@ pnpm run tauri dev
 Every pull request the agent creates or updates **must** include a `## Release Notes` section in the PR body. The CI pipeline extracts this section and prepends it to the GitHub Release created when the PR merges to `main`.
 
 **Format:**
+
 1. One to three sentences explaining what the change is and why it matters — written for a user, not a developer.
 2. A bullet list of specific user-facing changes. Skip purely internal work (refactors, CI fixes, test-only changes) unless it has a visible effect.
 
@@ -386,6 +401,7 @@ This release hardens the E2E test setup so the Playwright testing bridge is neve
 ```
 
 **Rules:**
+
 - Always write this section before opening or updating a PR — do not omit it.
 - Use plain language. Avoid Rust/TypeScript jargon in the explanatory sentences.
 - If a PR contains no user-facing changes (e.g. pure CI/infra work), write: `No user-facing changes in this release.`
@@ -435,6 +451,7 @@ When adding or changing **any** git or system interaction, follow all rules belo
 Always run the following before pushing code:
 
 **Frontend:**
+
 ```bash
 pnpm run lint      # Check code with oxlint (fast, Rust-based)
 pnpm run lint:fix  # Auto-fix linting issues
@@ -443,6 +460,7 @@ pnpm run check     # TypeScript type check
 ```
 
 **Backend:**
+
 ```bash
 cd src-tauri
 cargo clippy --all-targets -- -D warnings  # Check for issues
@@ -451,6 +469,7 @@ cargo test --lib                            # Run unit tests
 ```
 
 **Commit only when:**
+
 - ✅ `pnpm run lint` returns 0 warnings, 0 errors
 - ✅ `pnpm run check` passes (0 TypeScript errors)
 - ✅ `cargo clippy` passes (0 warnings with `-D warnings`)
@@ -510,6 +529,7 @@ GitTransaction::new(&repo_path)
 ```
 
 **Benefits:**
+
 - Atomic: all-or-nothing semantics
 - Clear intent: sequence of operations visible at a glance
 - Rollback-ready: foundation for future undo functionality
@@ -538,6 +558,7 @@ impl GitCache {
 ```
 
 **Usage pattern (ready for implementation):**
+
 - Cache refs to avoid repeated `git branch -a` calls
 - Cache status to avoid repeated `git status --porcelain` calls
 - Call `cache.invalidate()` in any write operation (create, delete, reset, etc.)
@@ -608,6 +629,7 @@ pub async fn fetch_parallel_data(repo_path: String) -> Result<WorkspaceSnapshot,
 ```
 
 **Benefits:**
+
 - Non-blocking: no sequential waiting
 - ~30% faster for batch reads
 - Uses Tauri's built-in tokio runtime (no extra dependency)
@@ -616,6 +638,7 @@ pub async fn fetch_parallel_data(repo_path: String) -> Result<WorkspaceSnapshot,
 ### Tier 3: Instrumentation & Middleware (Future)
 
 Add logging, metrics, and tracing for observability:
+
 - Log cache hits vs misses
 - Measure git operation latency
 - Track error rates by operation type
@@ -675,7 +698,7 @@ Every async operation requires three elements:
 
 ```svelte
 <script>
-  let deleting = $state<string | null>(null);  // Track which item is being deleted
+  let deleting = $state<string | null>(null); // Track which item is being deleted
 
   async function handleDelete(id: string) {
     deleting = id;
@@ -736,13 +759,15 @@ Every async operation requires three elements:
 ### Spinner Component
 
 The `Spinner.svelte` component supports:
+
 - **Sizes**: `sm`, `md`, `lg`
 - **Label**: Optional text below spinner
 - **Color**: Inherits `--sg-primary` automatically
 
 ```svelte
 <Spinner size="md" label="Loading…" />
-<Spinner size="sm" />  <!-- No label -->
+<Spinner size="sm" />
+<!-- No label -->
 ```
 
 ## Known Issues & Gotchas

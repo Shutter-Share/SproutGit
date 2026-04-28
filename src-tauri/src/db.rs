@@ -36,6 +36,9 @@ static WORKSPACE_MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
         M::up(include_str!(
             "../migrations/workspace/002_hook_keep_open_on_completion.sql"
         )),
+        M::up(include_str!(
+            "../migrations/workspace/003_hook_execution_preferences.sql"
+        )),
     ])
 });
 
@@ -46,22 +49,27 @@ static CONFIG_MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
 });
 
 fn ensure_workspace_schema_compatibility(conn: &rusqlite::Connection) -> Result<(), String> {
-    match conn.execute(
+    let compatibility_statements = [
         "ALTER TABLE hook_definitions ADD COLUMN keep_open_on_completion INTEGER NOT NULL DEFAULT 0",
-        [],
-    ) {
-        Ok(_) => Ok(()),
-        Err(err) => {
-            let message = err.to_string();
-            if message.contains("duplicate column name") {
-                Ok(())
-            } else {
-                Err(format!(
-                    "Failed to ensure workspace schema compatibility: {message}"
-                ))
-            }
-        },
+        "ALTER TABLE hook_definitions ADD COLUMN execution_target TEXT NOT NULL DEFAULT 'trigger_worktree'",
+        "ALTER TABLE hook_definitions ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'headless'",
+    ];
+
+    for statement in compatibility_statements {
+        match conn.execute(statement, []) {
+            Ok(_) => {},
+            Err(err) => {
+                let message = err.to_string();
+                if !message.contains("duplicate column name") {
+                    return Err(format!(
+                        "Failed to ensure workspace schema compatibility: {message}"
+                    ));
+                }
+            },
+        }
     }
+
+    Ok(())
 }
 
 fn run_workspace_migrations(db_path: &Path) -> Result<(), String> {
