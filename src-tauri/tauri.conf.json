@@ -33,6 +33,7 @@
   "bundle": {
     "active": true,
     "targets": [
+      "app",
       "appimage",
       "dmg",
       "msi"

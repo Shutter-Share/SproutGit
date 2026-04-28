@@ -391,6 +391,8 @@ jobs:
         with:
           name: SproutGit-macos
           path: |
+            src-tauri/target/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
             src-tauri/target/release/bundle/dmg/*.dmg
 
       - name: Upload artifacts (Windows)
@@ -469,6 +471,20 @@ jobs:
           WIN_SIG=$(cat "${WIN_MSI}.sig")
           WIN_FILENAME=$(basename "$WIN_MSI")
 
+          MAC_APP=$(find_required_artifact "artifacts/SproutGit-macos" "*.app.tar.gz" "macOS updater")
+          MAC_SIG=$(cat "${MAC_APP}.sig")
+          MAC_FILENAME=$(basename "$MAC_APP")
+
+          MAC_PLATFORM=""
+          if [[ "$MAC_FILENAME" == *"aarch64"* ]]; then
+            MAC_PLATFORM="darwin-aarch64"
+          elif [[ "$MAC_FILENAME" == *"x64"* ]] || [[ "$MAC_FILENAME" == *"x86_64"* ]]; then
+            MAC_PLATFORM="darwin-x86_64"
+          else
+            echo "::error::Could not infer macOS architecture from updater artifact: '${MAC_FILENAME}'."
+            exit 1
+          fi
+
           jq -n \
             --arg version "$VERSION" \
             --arg date "$DATE" \
@@ -476,6 +492,9 @@ jobs:
             --arg linux_sig "$LINUX_SIG" \
             --arg win_url "${BASE_URL}/${WIN_FILENAME}" \
             --arg win_sig "$WIN_SIG" \
+            --arg mac_url "${BASE_URL}/${MAC_FILENAME}" \
+            --arg mac_sig "$MAC_SIG" \
+            --arg mac_platform "$MAC_PLATFORM" \
             '{
               version: $version,
               pub_date: $date,
@@ -483,7 +502,10 @@ jobs:
                 "linux-x86_64":   {url: $linux_url, signature: $linux_sig},
                 "windows-x86_64": {url: $win_url,   signature: $win_sig}
               }
-            }' > latest.json
+            }
+            | .platforms[$mac_platform] = {url: $mac_url, signature: $mac_sig}
+            | .platforms[($mac_platform + "-app")] = {url: $mac_url, signature: $mac_sig}
+            ' > latest.json
 
       - name: Extract PR release notes
         env:
