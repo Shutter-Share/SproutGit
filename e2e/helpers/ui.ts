@@ -266,13 +266,21 @@ export async function importRepoViaUi(tauriPage: AdapterPage, repoPath: string) 
   );
 }
 
-export async function createWorktreeViaUi(tauriPage: AdapterPage, branchName: string) {
+export async function createWorktreeViaUi(
+  tauriPage: AdapterPage,
+  branchName: string,
+  sourceRef?: string
+) {
+  if (sourceRef) {
+    await tauriPage.getByTestId('input-source-ref').fill(sourceRef);
+  }
+
   await tauriPage.getByTestId('input-new-branch').fill(branchName);
   const createButton = tauriPage.getByTestId('btn-create-worktree');
   const isDisabled = async () => (await createButton.getAttribute('disabled')) !== null;
 
   if (await isDisabled()) {
-    await tauriPage.getByTestId('input-source-ref').fill('HEAD');
+    await tauriPage.getByTestId('input-source-ref').fill(sourceRef ?? 'HEAD');
   }
 
   const enableDeadline = Date.now() + DEFAULT_UI_TIMEOUT;

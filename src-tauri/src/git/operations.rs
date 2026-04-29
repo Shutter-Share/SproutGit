@@ -147,6 +147,40 @@ fn workspace_from_worktree_path(worktree_path: &Path) -> Option<PathBuf> {
     None
 }
 
+fn clear_branch_upstream(root_repo: &Path, branch: &str) -> Result<(), String> {
+    let output = run_git(
+        GitAction::UnsetGitConfig,
+        &[
+            "-C",
+            &root_repo.to_string_lossy(),
+            "branch",
+            "--unset-upstream",
+            branch,
+        ],
+    )?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_lowercase();
+
+    // Branches without upstream tracking return non-zero; that's expected.
+    if stderr.contains("has no upstream") || stderr.contains("no upstream configured") {
+        return Ok(());
+    }
+
+    if stderr.is_empty() {
+        return Err(format!(
+            "Failed to clear upstream tracking for branch '{branch}'"
+        ));
+    }
+
+    Err(format!(
+        "Failed to clear upstream tracking for branch '{branch}': {stderr}"
+    ))
+}
+
 // ── Commands ──
 
 #[tauri::command]
@@ -424,6 +458,7 @@ pub async fn create_managed_worktree(
     )?;
 
     ensure_git_success(output, "Failed to create managed worktree")?;
+    clear_branch_upstream(&root_repo, &branch)?;
 
     if let Some(workspace_path) = workspace_from_root_repo(&root_repo) {
         let _ = execute_workspace_hooks_for_trigger(

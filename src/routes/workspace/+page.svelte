@@ -52,7 +52,7 @@
   } from '$lib/sproutgit';
   import { toast } from '$lib/toast.svelte';
   import { tildify } from '$lib/paths.svelte';
-  import { findPath, normalizePathSeparators, pathsEqual } from '$lib/path-utils';
+  import { findPath, normalizePathSeparators, pathStartsWith, pathsEqual } from '$lib/path-utils';
   import { validateBranchName, validateSourceRef } from '$lib/validation';
   import { openPath } from '@tauri-apps/plugin-opener';
   import { FolderOpen, Play, Trash2, SquareTerminal, ShieldAlert, Settings } from 'lucide-svelte';
@@ -544,6 +544,62 @@
   const nonRootWorktrees = $derived(
     worktrees.filter(item => !pathsEqual(item.path, workspace?.rootPath))
   );
+
+  function isPersistentBranchName(branch: string | null | undefined): boolean {
+    if (!branch) return false;
+    return (
+      branch === 'main' ||
+      branch === 'master' ||
+      branch === 'develop' ||
+      branch.startsWith('release/')
+    );
+  }
+
+  const managedWorktrees = $derived.by(() => {
+    const currentWorkspace = workspace;
+    if (!currentWorkspace) return [];
+    return nonRootWorktrees.filter(item => pathStartsWith(currentWorkspace.worktreesPath, item.path));
+  });
+
+  const externalWorktrees = $derived.by(() => {
+    const currentWorkspace = workspace;
+    if (!currentWorkspace) return [];
+    return nonRootWorktrees.filter(
+      item => !pathStartsWith(currentWorkspace.worktreesPath, item.path)
+    );
+  });
+
+  const persistentWorktrees = $derived(
+    managedWorktrees.filter(item => isPersistentBranchName(item.branch))
+  );
+
+  const taskWorktrees = $derived(
+    managedWorktrees.filter(item => !isPersistentBranchName(item.branch))
+  );
+
+  const pinnedWorktrees = $derived.by(() => {
+    const pinned: WorktreeInfo[] = [];
+    const seen = new Set<string>();
+
+    const add = (item: WorktreeInfo | null | undefined) => {
+      if (!item) return;
+      if (seen.has(item.path)) return;
+      seen.add(item.path);
+      pinned.push(item);
+    };
+
+    add(taskWorktrees.find(item => pathsEqual(item.path, activeWorktreePath)));
+    for (const item of persistentWorktrees) add(item);
+    return pinned;
+  });
+
+  const cleanupCandidates = $derived(
+    taskWorktrees.filter(
+      item => !pathsEqual(item.path, activeWorktreePath) && (worktreeChangeCounts[item.path] ?? 0) === 0
+    )
+  );
+
+  const branchRefs = $derived(refs.filter(ref => ref.kind === 'branch'));
 
   const selectedWorktree = $derived(
     worktrees.find(item => pathsEqual(item.path, activeWorktreePath)) ?? null
@@ -1504,14 +1560,40 @@
   });
 
   // ── Worktree list context menu ──
-  function handleWorktreeContextMenu(wt: WorktreeInfo, e: MouseEvent) {
+  function handleWorktreeContextMenu(
+    wt: WorktreeInfo,
+    e: MouseEvent,
+    section: 'managed' | 'persistent' | 'external' | 'cleanup' = 'managed'
+  ) {
     e.preventDefault();
     const label = wt.branch ?? wt.path.split('/').pop() ?? 'worktree';
+    const branchName = wt.branch ?? '';
+    const targetRef = branchName || 'HEAD';
+    const allowCheckout = Boolean(wt.branch && !wt.detached);
+    const isActive = pathsEqual(activeWorktreePath, wt.path);
     const items: MenuItem[] = [
+      {
+        label: 'Switch here',
+        icon: '⇄',
+        action: () => {
+          activeWorktreePath = wt.path;
+        },
+        disabled: isActive,
+      },
       { label: 'Open folder', icon: '📂', action: () => handleRevealWorktree(wt.path) },
+      { label: 'Open in editor', icon: '⌨', action: () => handleOpenInEditor(wt.path) },
+      {
+        label: 'Copy path',
+        icon: '⧉',
+        action: () => {
+          void navigator.clipboard.writeText(wt.path);
+          toast.success('Copied worktree path');
+        },
+      },
       { separator: true },
     ];
-    if (wt.branch && !wt.detached) {
+
+    if (allowCheckout) {
       items.push({
         label: 'Checkout…',
         icon: '⎋',
@@ -1522,13 +1604,73 @@
           requestAnimationFrame(() => document.getElementById('action-ref')?.focus());
         },
       });
+    } else {
+      items.push({
+        label: 'Checkout unavailable (detached)',
+        icon: '⎋',
+        action: () => {},
+        disabled: true,
+      });
     }
-    items.push({ separator: true });
-    items.push({
-      label: `Delete "${label}"`,
-      danger: true,
-      action: () => handleDeleteWorktree(wt),
-    });
+
+    if (section === 'persistent') {
+      items.push({ separator: true });
+      items.push({
+        label: 'Pull (coming soon)',
+        icon: '↓',
+        action: () => {},
+        disabled: true,
+      });
+      items.push({
+        label: 'Push (coming soon)',
+        icon: '↑',
+        action: () => {},
+        disabled: true,
+      });
+      items.push({ separator: true });
+      items.push({
+        label: `Remove worktree "${label}"`,
+        danger: true,
+        action: () => handleDeleteWorktree(wt),
+      });
+    } else {
+      items.push({ separator: true });
+      items.push({
+        label: section === 'cleanup' ? `Cleanup "${label}"` : `Delete "${label}"`,
+        danger: true,
+        action: () => handleDeleteWorktree(wt),
+      });
+    }
+
+    if (targetRef) {
+      items.push({ separator: true });
+      items.push({
+        label: 'Create worktree from branch',
+        icon: '+',
+        action: () => handleCreateWorktreeFromGraph(targetRef),
+      });
+    }
+
+    worktreeContextMenu = { x: e.clientX, y: e.clientY, items };
+  }
+
+  function handleBranchRefContextMenu(refName: string, e: MouseEvent) {
+    e.preventDefault();
+    const items: MenuItem[] = [
+      {
+        label: 'Create worktree from branch',
+        icon: '+',
+        action: () => handleCreateWorktreeFromGraph(refName),
+      },
+      {
+        label: 'Copy branch name',
+        icon: '⧉',
+        action: () => {
+          void navigator.clipboard.writeText(refName);
+          toast.success('Copied branch name');
+        },
+      },
+    ];
     worktreeContextMenu = { x: e.clientX, y: e.clientY, items };
   }
 </script>
@@ -1738,6 +1880,9 @@
               Create worktree
             {/if}
           </button>
+          <p class="mt-1 text-[9px] text-[var(--sg-text-faint)]">
+            New worktree branches start without upstream tracking.
+          </p>
         </form>
 
         <!-- Worktree list -->
@@ -1746,7 +1891,7 @@
             <p
               class="text-[10px] font-semibold uppercase tracking-wider text-[var(--sg-text-faint)]"
             >
-              Worktrees
+              Workspace
             </p>
             <button
               onclick={() => {
@@ -1760,10 +1905,31 @@
             </button>
           </div>
           <div class="flex-1 overflow-auto px-2" data-testid="worktree-list">
-            {#if nonRootWorktrees.length === 0}
-              <p class="px-1 text-xs text-[var(--sg-text-faint)]">No managed worktrees yet.</p>
-            {:else}
-              {#each nonRootWorktrees as wt}
+            <div class="mb-2 rounded border border-[var(--sg-border-subtle)] bg-[var(--sg-surface-raised)] p-2">
+              <p class="text-[10px] font-semibold uppercase tracking-wider text-[var(--sg-text-faint)]">
+                Quick actions
+              </p>
+              <div class="mt-1.5 flex items-center gap-1">
+                <button
+                  onclick={() => document.getElementById('new-branch')?.focus()}
+                  class="rounded border border-[var(--sg-border)] px-2 py-1 text-[10px] text-[var(--sg-text-dim)] hover:bg-[var(--sg-surface)] hover:text-[var(--sg-text)]"
+                >
+                  New worktree
+                </button>
+                <button
+                  onclick={() => (activeTab = 'history')}
+                  class="rounded border border-[var(--sg-border)] px-2 py-1 text-[10px] text-[var(--sg-text-dim)] hover:bg-[var(--sg-surface)] hover:text-[var(--sg-text)]"
+                >
+                  History
+                </button>
+              </div>
+            </div>
+
+            {#if pinnedWorktrees.length > 0}
+              <p class="mb-1 px-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--sg-text-faint)]">
+                Pinned
+              </p>
+              {#each pinnedWorktrees as wt}
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
                 <!-- svelte-ignore a11y_click_events_have_key_events -->
                 <div
@@ -1776,9 +1942,39 @@
                   data-path={wt.path}
                   data-active={activeWorktreePath === wt.path ? 'true' : 'false'}
                   onclick={() => {
-                    activeWorktreePath = activeWorktreePath === wt.path ? null : wt.path;
+                    activeWorktreePath = wt.path;
                   }}
-                  oncontextmenu={e => handleWorktreeContextMenu(wt, e)}
+                  oncontextmenu={e => handleWorktreeContextMenu(wt, e, 'managed')}
+                >
+                  <span class="text-[10px] text-[var(--sg-warning)]">★</span>
+                  <span class="min-w-0 flex-1 truncate">{wt.branch ?? 'detached'}</span>
+                </div>
+              {/each}
+              <div class="my-2 border-t border-[var(--sg-border-subtle)]"></div>
+            {/if}
+
+            <p class="mb-1 px-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--sg-text-faint)]">
+              Managed worktrees
+            </p>
+            {#if taskWorktrees.length === 0}
+              <p class="mb-2 px-1 text-[10px] text-[var(--sg-text-faint)]">No managed task worktrees.</p>
+            {:else}
+              {#each taskWorktrees as wt}
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                <div
+                  class="group mb-0.5 flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-xs {activeWorktreePath ===
+                  wt.path
+                    ? 'bg-[var(--sg-surface-raised)] text-[var(--sg-primary)]'
+                    : 'text-[var(--sg-text-dim)] hover:bg-[var(--sg-surface-raised)]'}"
+                  data-testid="worktree-item"
+                  data-branch={wt.branch}
+                  data-path={wt.path}
+                  data-active={activeWorktreePath === wt.path ? 'true' : 'false'}
+                  onclick={() => {
+                    activeWorktreePath = wt.path;
+                  }}
+                  oncontextmenu={e => handleWorktreeContextMenu(wt, e, 'managed')}
                 >
                   <span
                     class="h-1.5 w-1.5 shrink-0 rounded-full {activeWorktreePath === wt.path
@@ -1790,56 +1986,141 @@
                   >
                   {#if (worktreeChangeCounts[wt.path] ?? 0) > 0}
                     <span
-                      class="shrink-0 rounded-full bg-[var(--sg-warning)]/20 px-1.5 py-0.5 font-mono text-[9px] font-bold text-[var(--sg-warning)] group-hover:hidden"
+                      class="shrink-0 rounded-full bg-[var(--sg-warning)]/20 px-1.5 py-0.5 font-mono text-[9px] font-bold text-[var(--sg-warning)]"
                     >
                       {worktreeChangeCounts[wt.path]}
                     </span>
                   {/if}
-                  <!-- svelte-ignore a11y_no_static_element_interactions -->
-                  <!-- svelte-ignore a11y_click_events_have_key_events -->
-                  <div
-                    class="hidden shrink-0 items-center gap-0.5 group-hover:flex"
-                    role="none"
-                    onclick={e => e.stopPropagation()}
+                  <button
+                    onclick={event => {
+                      event.stopPropagation();
+                      void handleDeleteWorktree(wt);
+                    }}
+                    disabled={deleting === wt.path}
+                    data-testid="btn-delete-worktree"
+                    class="hidden rounded p-0.5 text-[var(--sg-text-faint)] hover:bg-[var(--sg-surface)] hover:text-[var(--sg-danger)] group-hover:block disabled:opacity-40"
+                    title="Delete worktree"
                   >
-                    <button
-                      onclick={event => openRunHookMenu(wt, event.currentTarget as HTMLElement)}
-                      class="rounded p-0.5 text-[var(--sg-text-faint)] hover:bg-[var(--sg-surface)] hover:text-[var(--sg-text)]"
-                      title="Run hook"
-                    >
-                      <Play class="h-3 w-3" />
-                    </button>
-                    <button
-                      onclick={() => handleOpenInEditor(wt.path)}
-                      class="rounded p-0.5 text-[var(--sg-text-faint)] hover:bg-[var(--sg-surface)] hover:text-[var(--sg-text)]"
-                      title="Open in editor"
-                    >
-                      <SquareTerminal class="h-3 w-3" />
-                    </button>
-                    <button
-                      onclick={() => handleRevealWorktree(wt.path)}
-                      class="rounded p-0.5 text-[var(--sg-text-faint)] hover:bg-[var(--sg-surface)] hover:text-[var(--sg-text)]"
-                      title="Open folder"
-                    >
-                      <FolderOpen class="h-3 w-3" />
-                    </button>
-                    <button
-                      onclick={() => handleDeleteWorktree(wt)}
-                      disabled={deleting === wt.path}
-                      data-testid="btn-delete-worktree"
-                      class="rounded p-0.5 text-[var(--sg-text-faint)] hover:bg-[var(--sg-surface)] hover:text-[var(--sg-danger)] disabled:opacity-40"
-                      title="Delete worktree"
-                    >
-                      {#if deleting === wt.path}
-                        <Spinner size="sm" />
-                      {:else}
-                        <Trash2 class="h-3 w-3" />
-                      {/if}
-                    </button>
-                  </div>
+                    {#if deleting === wt.path}
+                      <Spinner size="sm" />
+                    {:else}
+                      <Trash2 class="h-3 w-3" />
+                    {/if}
+                  </button>
+                  <button
+                    onclick={event => {
+                      event.stopPropagation();
+                      void openRunHookMenu(wt, event.currentTarget as HTMLElement);
+                    }}
+                    class="hidden rounded p-0.5 text-[var(--sg-text-faint)] hover:bg-[var(--sg-surface)] hover:text-[var(--sg-text)] group-hover:block"
+                    title="Run hook"
+                  >
+                    <Play class="h-3 w-3" />
+                  </button>
                 </div>
               {/each}
             {/if}
+
+            {#if cleanupCandidates.length > 0}
+              <div class="my-2 border-t border-[var(--sg-border-subtle)]"></div>
+              <p class="mb-1 px-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--sg-text-faint)]">
+                Cleanup candidates
+              </p>
+              {#each cleanupCandidates as wt}
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                <div
+                  class="mb-0.5 flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-[var(--sg-text-dim)] hover:bg-[var(--sg-surface-raised)]"
+                  data-testid="worktree-item"
+                  data-branch={wt.branch}
+                  data-path={wt.path}
+                  data-active={activeWorktreePath === wt.path ? 'true' : 'false'}
+                  onclick={() => {
+                    activeWorktreePath = wt.path;
+                  }}
+                  oncontextmenu={e => handleWorktreeContextMenu(wt, e, 'cleanup')}
+                >
+                  <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--sg-primary)]/70"></span>
+                  <span class="min-w-0 flex-1 truncate">{wt.branch ?? 'unknown'}</span>
+                  <span class="rounded-full bg-[var(--sg-primary)]/15 px-1.5 py-0.5 text-[9px] text-[var(--sg-primary)]">ready</span>
+                </div>
+              {/each}
+            {/if}
+
+            {#if persistentWorktrees.length > 0}
+              <div class="my-2 border-t border-[var(--sg-border-subtle)]"></div>
+              <p class="mb-1 px-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--sg-text-faint)]">
+                Persistent branches
+              </p>
+              {#each persistentWorktrees as wt}
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                <div
+                  class="mb-0.5 flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-xs {activeWorktreePath ===
+                  wt.path
+                    ? 'bg-[var(--sg-surface-raised)] text-[var(--sg-primary)]'
+                    : 'text-[var(--sg-text-dim)] hover:bg-[var(--sg-surface-raised)]'}"
+                  data-testid="worktree-item"
+                  data-branch={wt.branch}
+                  data-path={wt.path}
+                  data-active={activeWorktreePath === wt.path ? 'true' : 'false'}
+                  onclick={() => {
+                    activeWorktreePath = wt.path;
+                  }}
+                  oncontextmenu={e => handleWorktreeContextMenu(wt, e, 'persistent')}
+                >
+                  <span class="text-[10px] text-[var(--sg-warning)]">🛡</span>
+                  <span class="min-w-0 flex-1 truncate">{wt.branch ?? 'persistent'}</span>
+                  <span class="rounded-full bg-[var(--sg-warning)]/15 px-1.5 py-0.5 text-[9px] text-[var(--sg-warning)]">protected</span>
+                </div>
+              {/each}
+            {/if}
+
+            {#if externalWorktrees.length > 0}
+              <div class="my-2 border-t border-[var(--sg-border-subtle)]"></div>
+              <p class="mb-1 px-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--sg-text-faint)]">
+                External worktrees
+              </p>
+              {#each externalWorktrees as wt}
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                <div
+                  class="mb-0.5 flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-[var(--sg-text-dim)] hover:bg-[var(--sg-surface-raised)]"
+                  data-testid="worktree-item"
+                  data-branch={wt.branch}
+                  data-path={wt.path}
+                  data-active={activeWorktreePath === wt.path ? 'true' : 'false'}
+                  onclick={() => {
+                    activeWorktreePath = wt.path;
+                  }}
+                  oncontextmenu={e => handleWorktreeContextMenu(wt, e, 'external')}
+                >
+                  <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--sg-text-faint)]"></span>
+                  <span class="min-w-0 flex-1 truncate">{wt.branch ?? wt.path.split('/').pop()}</span>
+                </div>
+              {/each}
+            {/if}
+
+            <div class="my-2 border-t border-[var(--sg-border-subtle)]"></div>
+            <p class="mb-1 px-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--sg-text-faint)]">
+              Branches
+            </p>
+            <div class="space-y-0.5 pb-2">
+              {#each branchRefs.slice(0, 20) as ref}
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                <div
+                  class="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-[10px] text-[var(--sg-text-faint)] hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text)]"
+                  oncontextmenu={e => handleBranchRefContextMenu(ref.name, e)}
+                  onclick={() => {
+                    selectedRef = ref.name;
+                    formTouched.ref = true;
+                  }}
+                >
+                  <span class="truncate">{ref.name}</span>
+                </div>
+              {/each}
+            </div>
           </div>
         </div>
 
