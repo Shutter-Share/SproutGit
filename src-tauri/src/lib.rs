@@ -19,6 +19,15 @@ fn get_home_dir() -> Result<String, String> {
     Ok(home.replace('\\', "/"))
 }
 
+/// Returns whether this build was compiled with the `e2e-testing` feature.
+/// Used by the frontend to skip side effects (e.g. update checks) during E2E
+/// runs without requiring environment variables to be propagated into the
+/// webview.
+#[tauri::command]
+fn is_e2e_build() -> bool {
+    cfg!(feature = "e2e-testing")
+}
+
 /// Resize the main window to the given logical dimensions.
 /// Only compiled and registered when the `e2e-testing` feature is active so it
 /// is absent from production builds.
@@ -132,6 +141,7 @@ pub fn run() {
             github::list_github_repos,
             github::list_github_email_suggestions,
             get_home_dir,
+            is_e2e_build,
             terminal::list_available_shells,
             terminal::spawn_terminal,
             terminal::terminal_input,

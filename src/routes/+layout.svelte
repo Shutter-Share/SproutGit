@@ -80,6 +80,11 @@
     if (!import.meta.env.DEV) {
       void (async () => {
         try {
+          // Skip update check in E2E builds so screenshots and tests don't
+          // capture a transient update badge.
+          const { invoke } = await import('@tauri-apps/api/core');
+          const isE2E = await invoke<boolean>('is_e2e_build').catch(() => false);
+          if (isE2E) return;
           const { check } = await import('@tauri-apps/plugin-updater');
           const update = await check();
           updateState.set(update);
