@@ -739,6 +739,7 @@
   let statusLoading = $state(false);
   let stagingAction = $state<string | null>(null);
   let committing = $state(false);
+  const pendingWatcherRefreshPaths = new Set<string>();
 
   // ── Active tab ──────────────────────────────────────────────────────────────
   // Three tabs: 'history' | 'changes' | 'terminal'
@@ -895,6 +896,37 @@
     }
   }
 
+  function queueWatcherRefresh(path: string) {
+    pendingWatcherRefreshPaths.add(path);
+  }
+
+  async function flushQueuedWatcherRefreshes() {
+    if (stagingAction || committing || pendingWatcherRefreshPaths.size === 0) return;
+
+    const queuedPaths = [...pendingWatcherRefreshPaths];
+    pendingWatcherRefreshPaths.clear();
+
+    for (const queuedPath of queuedPaths) {
+      try {
+        await refreshWorktreeStatusFromWatcher(queuedPath);
+      } catch {
+        // Ignore — worktree may have been deleted before the deferred refresh ran.
+      }
+    }
+  }
+
+  async function refreshWorktreeStatusFromWatcher(changedPath: string) {
+    const result = await getWorktreeStatus(changedPath);
+    worktreeChangeCounts[changedPath] = result.files.length;
+    if (pathsEqual(changedPath, selectedWorktree?.path)) {
+      worktreeStatus = result.files;
+      // Refresh active diff to reflect the new working tree / index state.
+      if (stagingDiffFile && activeTab === 'changes') {
+        void loadStagingDiff(stagingDiffFile, stagingDiffStaged);
+      }
+    }
+  }
+
   async function handleStageFiles(paths: string[]) {
     if (!selectedWorktree) return;
     stagingAction = paths[0];
@@ -909,6 +941,7 @@
       toast.error(String(err));
     } finally {
       stagingAction = null;
+      await flushQueuedWatcherRefreshes();
     }
   }
 
@@ -926,6 +959,7 @@
       toast.error(String(err));
     } finally {
       stagingAction = null;
+      await flushQueuedWatcherRefreshes();
     }
   }
 
@@ -946,6 +980,7 @@
       toast.error(String(err));
     } finally {
       committing = false;
+      await flushQueuedWatcherRefreshes();
     }
   }
 
@@ -1046,19 +1081,15 @@
     // listWorktrees returns forward-slash paths. Normalise separators only —
     // never lowercase, since Linux filesystems are case-sensitive.
     const changedPath = normalizePathSeparators(changedPathRaw);
+    if (stagingAction || committing) {
+      queueWatcherRefresh(changedPath);
+      return;
+    }
     // Update the change count and file list for the specific worktree that changed.
     // Never resets activeWorktreePath or activeTab, and never touches the graph
     // (to avoid a visible full re-render while the user is on the Changes tab).
     try {
-      const result = await getWorktreeStatus(changedPath);
-      worktreeChangeCounts[changedPath] = result.files.length;
-      if (pathsEqual(changedPath, selectedWorktree?.path)) {
-        worktreeStatus = result.files;
-        // Refresh active diff to reflect the new working tree / index state.
-        if (stagingDiffFile && activeTab === 'changes') {
-          void loadStagingDiff(stagingDiffFile, stagingDiffStaged);
-        }
-      }
+      await refreshWorktreeStatusFromWatcher(changedPath);
     } catch {
       // Ignore — worktree may have been deleted.
     }
