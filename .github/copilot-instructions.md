@@ -156,10 +156,11 @@ SproutGit manages user repos in a prescribed directory layout:
 
 Representative command groups currently include:
 
-- Git operations and worktree lifecycle (`git_info`, `list_worktrees`, `create_managed_worktree`, `delete_managed_worktree`, `checkout_worktree`, `reset_worktree_branch`)
+- Git operations and worktree lifecycle (`git_info`, `list_worktrees`, `create_managed_worktree`, `delete_managed_worktree`, `checkout_worktree`, `reset_worktree_branch`, `get_worktree_push_status`, `fetch_worktree`, `pull_worktree`, `push_worktree_branch`)
 - Diff and staging (`get_diff_files`, `get_diff_content`, `get_worktree_status`, `stage_files`, `unstage_files`, `create_commit`, `get_working_diff`)
 - Workspace and config (`create_sproutgit_workspace`, `import_git_repo_workspace`, `inspect_sproutgit_workspace`, recent workspaces, app settings)
 - Hooks (`list_workspace_hooks`, create/update/delete/toggle, `run_workspace_hook`)
+- Worktree metadata (`list_worktree_provenance`, `get_worktree_provenance`, nested repo sync rule CRUD)
 - Editor/Git tool integration (`open_in_editor`, editor detection, git config read/write)
 - Terminal and watcher (`spawn_terminal`, `terminal_input`, `start_watching_worktrees`)
 - Optional E2E-only helpers (`set_window_size` when `e2e-testing` feature is enabled)
@@ -192,9 +193,10 @@ Representative export groups include:
 
 - `getGitInfo()`, `createWorkspace()`, `inspectWorkspace()`
 - Workspace import and recents/settings
-- Worktree lifecycle (`createManagedWorktree`, delete, checkout, reset)
+- Worktree lifecycle (`createManagedWorktree`, delete, checkout, reset, push status, fetch, pull, push/publish)
 - Diff and staging helpers
 - Hook CRUD + progress listeners (`onHookProgress`)
+- Worktree provenance + nested repo sync rule helpers
 - File watcher helpers
 - Terminal lifecycle helpers
 - GitHub auth/repo helpers

@@ -132,6 +132,16 @@ Remote refs are source of truth for synchronization status, but local lifecycle 
 - Remote state does not unilaterally force local deletion.
 - Local branch deletion always requires explicit user confirmation (except future policy opt-ins).
 
+## Upstream And Publish Policy
+
+To avoid accidental pushes to the wrong remote branch, SproutGit uses an explicit publish model for new worktree branches.
+
+1. On managed worktree create, upstream tracking is cleared intentionally.
+2. The first push from a branch without upstream requires explicit publish setup: user selects the remote, then SproutGit runs publish semantics (`git push -u <remote> <branch>`).
+3. Publish picks remote in this order: `branch.<name>.pushRemote`, `remote.pushDefault`, `branch.<name>.remote`, then `origin`, then `upstream`, then first configured remote.
+4. Once upstream exists, subsequent pushes use normal `git push` behavior.
+5. Source ref selection for new worktrees should prefer remote refs, with `upstream/*` ranked ahead of local branches.
+
 ## Default Product Policy (Recommended)
 
 1. Enforce 1:1 binding for managed branches.

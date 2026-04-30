@@ -212,6 +212,7 @@ Provide minimal, explicit environment variables:
 - `SPROUTGIT_TRIGGER`
 - `SPROUTGIT_TRIGGER_PHASE`
 - `SPROUTGIT_TRIGGER_ACTION`
+- `SPROUTGIT_SOURCE_REF` (set for worktree create triggers when available)
 - `SPROUTGIT_HOOK_ID`
 - `SPROUTGIT_HOOK_NAME`
 - `SPROUTGIT_HOOK_SCOPE`

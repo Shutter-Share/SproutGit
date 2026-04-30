@@ -59,11 +59,16 @@ pub enum GitAction {
     StageFiles,
     UnstageFiles,
     CreateCommit,
+    DeleteBranch,
+    Push,
+    Fetch,
+    Pull,
+    ListRemotes,
 }
 
 impl GitAction {
     #[cfg(test)]
-    pub const ALL: [GitAction; 26] = [
+    pub const ALL: [GitAction; 31] = [
         GitAction::GitInfo,
         GitAction::WorktreeList,
         GitAction::ListRefs,
@@ -90,6 +95,11 @@ impl GitAction {
         GitAction::StageFiles,
         GitAction::UnstageFiles,
         GitAction::CreateCommit,
+        GitAction::DeleteBranch,
+        GitAction::Push,
+        GitAction::Fetch,
+        GitAction::Pull,
+        GitAction::ListRemotes,
     ];
 
     pub fn label(self) -> &'static str {
@@ -120,6 +130,11 @@ impl GitAction {
             GitAction::StageFiles => "stage_files",
             GitAction::UnstageFiles => "unstage_files",
             GitAction::CreateCommit => "create_commit",
+            GitAction::DeleteBranch => "delete_branch",
+            GitAction::Push => "push",
+            GitAction::Fetch => "fetch",
+            GitAction::Pull => "pull",
+            GitAction::ListRemotes => "list_remotes",
         }
     }
 }

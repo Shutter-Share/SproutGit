@@ -8,6 +8,7 @@ mod recent_docs;
 mod terminal;
 mod watcher;
 mod workspace;
+mod worktree_metadata;
 
 #[tauri::command]
 fn get_home_dir() -> Result<String, String> {
@@ -103,6 +104,10 @@ pub fn run() {
             git::operations::delete_managed_worktree,
             git::operations::checkout_worktree,
             git::operations::reset_worktree_branch,
+            git::operations::get_worktree_push_status,
+            git::operations::fetch_worktree,
+            git::operations::pull_worktree,
+            git::operations::push_worktree_branch,
             git::diff::get_diff_files,
             git::diff::get_diff_content,
             git::staging::get_worktree_status,
@@ -131,6 +136,11 @@ pub fn run() {
             hooks::toggle_workspace_hook,
             hooks::get_available_hook_shells,
             hooks::run_workspace_hook,
+            worktree_metadata::list_worktree_provenance,
+            worktree_metadata::get_worktree_provenance,
+            worktree_metadata::list_nested_repo_sync_rules,
+            worktree_metadata::upsert_nested_repo_sync_rule,
+            worktree_metadata::delete_nested_repo_sync_rule,
             github::migrate_github_auth_storage,
             github::github_device_flow_start,
             github::github_device_flow_poll,

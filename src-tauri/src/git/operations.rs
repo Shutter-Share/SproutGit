@@ -7,6 +7,7 @@ use crate::git::helpers::{
     validate_non_option_value, GitAction,
 };
 use crate::hooks::execute_workspace_hooks_for_trigger;
+use crate::worktree_metadata::{delete_worktree_provenance, record_worktree_creation_provenance};
 
 // ── Structs ──
 
@@ -84,6 +85,26 @@ pub struct CheckoutResult {
     pub previous_branch: Option<String>,
     pub new_branch: String,
     pub stashed: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PushBranchResult {
+    pub worktree_path: String,
+    pub branch: String,
+    pub upstream: Option<String>,
+    pub published: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreePushStatus {
+    pub worktree_path: String,
+    pub branch: Option<String>,
+    pub upstream: Option<String>,
+    pub remotes: Vec<String>,
+    pub suggested_remote: Option<String>,
+    pub detached: bool,
 }
 
 /// Clamp a graph page size to [20, 2000], defaulting to 2000.
@@ -175,6 +196,115 @@ fn clear_branch_upstream(root_repo: &Path, branch: &str) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn git_config_get(repo_path: &str, key: &str) -> Result<Option<String>, String> {
+    let output = run_git(
+        GitAction::ReadGitConfig,
+        &["-C", repo_path, "config", "--get", key],
+    )?;
+
+    if output.status.success() {
+        let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if value.is_empty() {
+            return Ok(None);
+        }
+        return Ok(Some(value));
+    }
+
+    if output.status.code() == Some(1) {
+        return Ok(None);
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    Err(format!("Failed to read git config '{key}': {stderr}"))
+}
+
+fn choose_publish_remote(repo_path: &str, branch: &str) -> Result<String, String> {
+    let remotes_output = run_git(GitAction::ListRemotes, &["-C", repo_path, "remote"])?;
+    let remotes_output = ensure_git_success(remotes_output, "Failed to list git remotes")?;
+    let remotes: Vec<String> = String::from_utf8_lossy(&remotes_output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(String::from)
+        .collect();
+
+    if remotes.is_empty() {
+        return Err("Cannot publish branch because no remotes are configured".to_string());
+    }
+
+    for key in &[
+        format!("branch.{branch}.pushRemote"),
+        "remote.pushDefault".to_string(),
+        format!("branch.{branch}.remote"),
+    ] {
+        if let Some(candidate) = git_config_get(repo_path, key)? {
+            if remotes.iter().any(|remote| remote == &candidate) {
+                return Ok(candidate);
+            }
+        }
+    }
+
+    if remotes.iter().any(|remote| remote == "origin") {
+        return Ok("origin".to_string());
+    }
+
+    if remotes.iter().any(|remote| remote == "upstream") {
+        return Ok("upstream".to_string());
+    }
+
+    Ok(remotes[0].clone())
+}
+
+fn list_remotes_for_repo(repo_path: &str) -> Result<Vec<String>, String> {
+    let remotes_output = run_git(GitAction::ListRemotes, &["-C", repo_path, "remote"])?;
+    let remotes_output = ensure_git_success(remotes_output, "Failed to list git remotes")?;
+    Ok(String::from_utf8_lossy(&remotes_output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(String::from)
+        .collect())
+}
+
+fn current_branch_and_upstream(repo_path: &str) -> Result<(Option<String>, Option<String>), String> {
+    let branch_output = run_git(
+        GitAction::RevParse,
+        &["-C", repo_path, "rev-parse", "--abbrev-ref", "HEAD"],
+    )?;
+    let branch_output = ensure_git_success(branch_output, "Failed to determine current branch")?;
+    let branch_name = String::from_utf8_lossy(&branch_output.stdout).trim().to_string();
+    let branch = if branch_name.is_empty() || branch_name == "HEAD" {
+        None
+    } else {
+        Some(branch_name)
+    };
+
+    let upstream_output = run_git(
+        GitAction::RevParse,
+        &[
+            "-C",
+            repo_path,
+            "rev-parse",
+            "--abbrev-ref",
+            "--symbolic-full-name",
+            "@{upstream}",
+        ],
+    )?;
+
+    let upstream = if upstream_output.status.success() {
+        let value = String::from_utf8_lossy(&upstream_output.stdout).trim().to_string();
+        if value.is_empty() {
+            None
+        } else {
+            Some(value)
+        }
+    } else {
+        None
+    };
+
+    Ok((branch, upstream))
 }
 
 // ── Commands ──
@@ -275,6 +405,7 @@ pub async fn list_refs(repo_path: String) -> Result<RefsResult, String> {
             "--sort=-committerdate",
             "--format=%(refname)|%(refname:short)|%(objectname)",
             "refs/heads",
+            "refs/remotes",
             "refs/tags",
         ],
     )?;
@@ -292,9 +423,15 @@ pub async fn list_refs(repo_path: String) -> Result<RefsResult, String> {
 
             let kind = if full_name.starts_with("refs/heads/") {
                 "branch"
+            } else if full_name.starts_with("refs/remotes/") {
+                "remote"
             } else {
                 "tag"
             };
+
+            if kind == "remote" && short_name.ends_with("/HEAD") {
+                return None;
+            }
 
             Some(RefInfo {
                 name: short_name,
@@ -421,6 +558,7 @@ pub async fn create_managed_worktree(
                 workspace_path: workspace_path.clone(),
                 trigger_worktree_path: Some(target_worktree.clone()),
                 initiating_worktree_path: initiating_worktree.clone(),
+                source_ref: Some(ref_name.to_string()),
             },
             "before_worktree_create",
             Some(&app_handle),
@@ -457,11 +595,27 @@ pub async fn create_managed_worktree(
     clear_branch_upstream(&root_repo, &branch)?;
 
     if let Some(workspace_path) = workspace_from_root_repo(&root_repo) {
+        if let Err(err) = record_worktree_creation_provenance(
+            &workspace_path,
+            &root_repo,
+            &target_worktree,
+            &branch,
+            &ref_name,
+            initiating_worktree.as_deref(),
+        )
+        .await
+        {
+            eprintln!("Failed to persist worktree provenance: {err}");
+        }
+    }
+
+    if let Some(workspace_path) = workspace_from_root_repo(&root_repo) {
         let _ = execute_workspace_hooks_for_trigger(
             crate::hooks::HookExecutionContext {
                 workspace_path: workspace_path.clone(),
                 trigger_worktree_path: Some(target_worktree.clone()),
                 initiating_worktree_path: initiating_worktree.clone(),
+                source_ref: Some(ref_name.to_string()),
             },
             "after_worktree_create",
             Some(&app_handle),
@@ -497,6 +651,7 @@ pub async fn delete_managed_worktree(
                 workspace_path: workspace_path.clone(),
                 trigger_worktree_path: Some(wt_path.clone()),
                 initiating_worktree_path: initiating_worktree.clone(),
+                source_ref: None,
             },
             "before_worktree_remove",
             Some(&app_handle),
@@ -511,6 +666,30 @@ pub async fn delete_managed_worktree(
         }
     }
 
+    // Read the branch name from the worktree before removing it so we can
+    // delete it afterwards if requested.
+    let branch_to_delete: Option<String> = if delete_branch {
+        let out = run_git(
+            GitAction::RevParse,
+            &[
+                "-C",
+                &wt_path.to_string_lossy(),
+                "rev-parse",
+                "--abbrev-ref",
+                "HEAD",
+            ],
+        );
+        match out {
+            Ok(o) if o.status.success() => {
+                let b = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                if b == "HEAD" { None } else { Some(b) }
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+
     let output = run_git(
         GitAction::DeleteManagedWorktree,
         &[
@@ -524,20 +703,40 @@ pub async fn delete_managed_worktree(
     )?;
     ensure_git_success(output, "Failed to remove worktree")?;
 
-    if delete_branch {
-        let output = run_git(
-            GitAction::PruneWorktrees,
-            &["-C", &root_repo.to_string_lossy(), "worktree", "prune"],
+    // Prune stale worktree metadata regardless of branch deletion.
+    let _ = run_git(
+        GitAction::PruneWorktrees,
+        &["-C", &root_repo.to_string_lossy(), "worktree", "prune"],
+    );
+
+    if let Some(branch) = branch_to_delete {
+        let out = run_git(
+            GitAction::DeleteBranch,
+            &[
+                "-C",
+                &root_repo.to_string_lossy(),
+                "branch",
+                "-D",
+                &branch,
+            ],
         )?;
-        let _ = ensure_git_success(output, "Failed to prune worktrees");
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            eprintln!("Failed to delete branch '{branch}': {stderr}");
+        }
     }
 
     if let Some(workspace_path) = workspace_from_root_repo(&root_repo) {
+        if let Err(err) = delete_worktree_provenance(&workspace_path, &wt_path).await {
+            eprintln!("Failed to remove worktree provenance: {err}");
+        }
+
         let _ = execute_workspace_hooks_for_trigger(
             crate::hooks::HookExecutionContext {
                 workspace_path: workspace_path.clone(),
                 trigger_worktree_path: Some(wt_path.clone()),
                 initiating_worktree_path: initiating_worktree.clone(),
+                source_ref: None,
             },
             "after_worktree_remove",
             Some(&app_handle),
@@ -566,6 +765,7 @@ pub async fn checkout_worktree(
                 workspace_path: workspace_path.clone(),
                 trigger_worktree_path: Some(wt_path.clone()),
                 initiating_worktree_path: Some(wt_path.clone()),
+                source_ref: None,
             },
             "before_worktree_switch",
             Some(&app_handle),
@@ -654,6 +854,7 @@ pub async fn checkout_worktree(
                         workspace_path: workspace_path.clone(),
                         trigger_worktree_path: Some(wt_path.clone()),
                         initiating_worktree_path: Some(wt_path.clone()),
+                        source_ref: None,
                     },
                     "after_worktree_switch",
                     Some(&app_handle),
@@ -676,6 +877,7 @@ pub async fn checkout_worktree(
                 workspace_path: workspace_path.clone(),
                 trigger_worktree_path: Some(wt_path.clone()),
                 initiating_worktree_path: Some(wt_path.clone()),
+                source_ref: None,
             },
             "after_worktree_switch",
             Some(&app_handle),
@@ -719,6 +921,118 @@ pub async fn reset_worktree_branch(
     ensure_git_success(output, "Failed to reset branch")?;
 
     Ok(format!("Reset to {target} ({mode})"))
+}
+
+#[tauri::command]
+pub async fn get_worktree_push_status(worktree_path: String) -> Result<WorktreePushStatus, String> {
+    let wt_path = normalize_existing_path(&worktree_path)?;
+    let wt_str = wt_path.to_string_lossy();
+
+    let remotes = list_remotes_for_repo(&wt_str)?;
+    let (branch, upstream) = current_branch_and_upstream(&wt_str)?;
+
+    let suggested_remote = if let Some(branch_name) = branch.as_ref() {
+        choose_publish_remote(&wt_str, branch_name).ok()
+    } else {
+        None
+    };
+
+    let detached = branch.is_none();
+
+    Ok(WorktreePushStatus {
+        worktree_path: path_to_frontend(&wt_path),
+        branch,
+        upstream,
+        remotes,
+        suggested_remote,
+        detached,
+    })
+}
+
+#[tauri::command]
+pub async fn fetch_worktree(worktree_path: String) -> Result<String, String> {
+    let wt_path = normalize_existing_path(&worktree_path)?;
+    let wt_str = wt_path.to_string_lossy();
+
+    let output = run_git(
+        GitAction::Fetch,
+        &["-C", &wt_str, "fetch", "--all", "--prune"],
+    )?;
+    ensure_git_success(output, "Failed to fetch remotes")?;
+
+    Ok("Fetched remotes".to_string())
+}
+
+#[tauri::command]
+pub async fn pull_worktree(worktree_path: String) -> Result<String, String> {
+    let wt_path = normalize_existing_path(&worktree_path)?;
+    let wt_str = wt_path.to_string_lossy();
+
+    let (branch, upstream) = current_branch_and_upstream(&wt_str)?;
+    let branch = branch.ok_or_else(|| {
+        "Cannot pull from detached HEAD; checkout a branch first".to_string()
+    })?;
+
+    if upstream.is_none() {
+        return Err(format!(
+            "Branch '{branch}' has no upstream configured. Publish it first from Push."
+        ));
+    }
+
+    let output = run_git(GitAction::Pull, &["-C", &wt_str, "pull", "--ff-only"])?;
+    ensure_git_success(output, "Failed to pull branch")?;
+
+    Ok(format!("Pulled {branch}"))
+}
+
+#[tauri::command]
+pub async fn push_worktree_branch(
+    worktree_path: String,
+    publish_remote: Option<String>,
+) -> Result<PushBranchResult, String> {
+    let wt_path = normalize_existing_path(&worktree_path)?;
+    let wt_str = wt_path.to_string_lossy();
+
+    let (branch, upstream) = current_branch_and_upstream(&wt_str)?;
+    let branch = branch.ok_or_else(|| {
+        "Cannot push from detached HEAD; checkout a branch first".to_string()
+    })?;
+
+    if upstream.is_some() {
+        let push_output = run_git(GitAction::Push, &["-C", &wt_str, "push"])?;
+        ensure_git_success(push_output, "Failed to push branch")?;
+
+        return Ok(PushBranchResult {
+            worktree_path: path_to_frontend(&wt_path),
+            branch,
+            upstream,
+            published: false,
+        });
+    }
+
+    let publish_remote = if let Some(remote) = publish_remote {
+        let remote = validate_non_option_value(remote.trim(), "Publish remote")?.to_string();
+        let remotes = list_remotes_for_repo(&wt_str)?;
+        if !remotes.iter().any(|r| r == &remote) {
+            return Err(format!("Remote '{remote}' is not configured in this repository"));
+        }
+        remote
+    } else {
+        return Err("UPSTREAM_NOT_CONFIGURED".to_string());
+    };
+
+    let publish_output = run_git(
+        GitAction::Push,
+        &["-C", &wt_str, "push", "-u", &publish_remote, &branch],
+    )?;
+    ensure_git_success(publish_output, "Failed to publish branch")?;
+
+    Ok(PushBranchResult {
+        worktree_path: path_to_frontend(&wt_path),
+        branch: branch.clone(),
+        upstream: Some(format!("{publish_remote}/{branch}")),
+        published: true,
+    })
 }
 
 // ── Tier 2: Semantic High-Level Operations ──

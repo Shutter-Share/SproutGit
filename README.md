@@ -72,6 +72,9 @@ No conflicts, no stash juggling, no waiting. Each agent works independently on i
 - **Interactive commit graph** — Lane-based SVG graph with search, selection, and context menus
 - **Diff viewer** — Single-commit and multi-commit range diffs with file list and unified diff display
 - **Branch management** — Checkout, reset (soft/mixed/hard), and create branches from any ref
+- **Publish-aware push** — First push publishes with upstream (`-u`) when none is configured; later pushes use normal tracking
+- **Active worktree sync actions** — Fetch, pull (`--ff-only`), and push/publish from the toolbar for the selected worktree
+- **Remote-first source refs** — Worktree creation prioritizes remote refs (prefers `upstream/*`) to reduce stale local-base mistakes
 - **Workspace hooks** — Run before/after create, remove, and switch operations with dependency ordering and per-hook output
 - **Editor integration** — Open worktrees in your configured editor (respects `GIT_EDITOR`, `core.editor`, `VISUAL`, `EDITOR`)
 - **Dark mode** — Automatic light/dark theme via system preferences

@@ -48,7 +48,7 @@ export type RecentWorkspace = {
 export type RefInfo = {
   name: string;
   fullName: string;
-  kind: 'branch' | 'tag';
+  kind: 'branch' | 'remote' | 'tag';
   target: string;
 };
 
@@ -77,6 +77,28 @@ export type CreateWorktreeResult = {
   worktreePath: string;
   branch: string;
   fromRef: string;
+};
+
+export type WorktreeProvenance = {
+  worktreePath: string;
+  branch: string;
+  sourceRef: string;
+  initiatingWorktreePath?: string | null;
+  rootRepoPath: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type NestedRepoSyncRule = {
+  repoRelativePath: string;
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type NestedRepoSyncRuleInput = {
+  repoRelativePath: string;
+  enabled: boolean;
 };
 
 export type WorkspaceHookTrigger =
@@ -134,6 +156,22 @@ export type CheckoutResult = {
   previousBranch: string | null;
   newBranch: string;
   stashed: boolean;
+};
+
+export type PushBranchResult = {
+  worktreePath: string;
+  branch: string;
+  upstream: string | null;
+  published: boolean;
+};
+
+export type WorktreePushStatus = {
+  worktreePath: string;
+  branch: string | null;
+  upstream: string | null;
+  remotes: string[];
+  suggestedRemote: string | null;
+  detached: boolean;
 };
 
 export type DiffFileEntry = {
@@ -340,6 +378,21 @@ export const resetWorktreeBranch = (
     mode,
   });
 
+export const getWorktreePushStatus = (worktreePath: string) =>
+  invoke<WorktreePushStatus>('get_worktree_push_status', { worktreePath });
+
+export const fetchWorktree = (worktreePath: string) =>
+  invoke<string>('fetch_worktree', { worktreePath });
+
+export const pullWorktree = (worktreePath: string) =>
+  invoke<string>('pull_worktree', { worktreePath });
+
+export const pushWorktreeBranch = (worktreePath: string, publishRemote?: string | null) =>
+  invoke<PushBranchResult>('push_worktree_branch', {
+    worktreePath,
+    publishRemote: publishRemote?.trim() ? publishRemote : null,
+  });
+
 export const listWorkspaceHooks = (workspacePath: string, trigger?: WorkspaceHookTrigger) =>
   invoke<WorkspaceHook[]>('list_workspace_hooks', {
     workspacePath,
@@ -380,6 +433,30 @@ export const runWorkspaceHook = (
     hookId,
     worktreePath,
     initiatingWorktreePath: initiatingWorktreePath?.trim() ? initiatingWorktreePath : null,
+  });
+
+export const listWorktreeProvenance = (workspacePath: string) =>
+  invoke<WorktreeProvenance[]>('list_worktree_provenance', { workspacePath });
+
+export const getWorktreeProvenance = (workspacePath: string, worktreePath: string) =>
+  invoke<WorktreeProvenance | null>('get_worktree_provenance', {
+    workspacePath,
+    worktreePath,
+  });
+
+export const listNestedRepoSyncRules = (workspacePath: string) =>
+  invoke<NestedRepoSyncRule[]>('list_nested_repo_sync_rules', { workspacePath });
+
+export const upsertNestedRepoSyncRule = (workspacePath: string, input: NestedRepoSyncRuleInput) =>
+  invoke<NestedRepoSyncRule>('upsert_nested_repo_sync_rule', {
+    workspacePath,
+    input,
+  });
+
+export const deleteNestedRepoSyncRule = (workspacePath: string, repoRelativePath: string) =>
+  invoke<void>('delete_nested_repo_sync_rule', {
+    workspacePath,
+    repoRelativePath,
   });
 
 export const openInEditor = (worktreePath: string) =>

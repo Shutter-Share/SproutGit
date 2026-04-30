@@ -7,6 +7,7 @@
   import ConfirmDialog from '$lib/components/ConfirmDialog.svelte';
   import ContextMenu, { type MenuItem } from '$lib/components/ContextMenu.svelte';
   import DiffViewer from '$lib/components/DiffViewer.svelte';
+  import Select from '$lib/components/Select.svelte';
   import Spinner from '$lib/components/Spinner.svelte';
   import TerminalContainer from '$lib/components/TerminalContainer.svelte';
   import WorkspaceHooksModal from '$lib/components/WorkspaceHooksModal.svelte';
@@ -30,6 +31,10 @@
     runWorkspaceHook,
     getWorktreeStatus,
     getWorkingDiff,
+    getWorktreePushStatus,
+    fetchWorktree,
+    pullWorktree,
+    pushWorktreeBranch,
     stageFiles,
     unstageFiles,
     createCommit,
@@ -92,6 +97,12 @@
   let loading = $state(true);
   let creating = $state(false);
   let deleting = $state<string | null>(null);
+  let syncingAction = $state<'fetch' | 'pull' | 'push' | null>(null);
+  let publishModalOpen = $state(false);
+  let publishRemote = $state('');
+  let publishRemotes = $state<string[]>([]);
+  let publishBranch = $state('');
+  let publishTargetWorktreePath = $state<string | null>(null);
   let error = $state('');
 
   // Confirm dialog state
@@ -681,7 +692,34 @@
     worktrees.find(item => pathsEqual(item.path, activeWorktreePath)) ?? null
   );
 
-  const refItems = $derived(refs.map(r => ({ label: r.name, value: r.name, detail: r.kind })));
+  function compareRefsForCreate(a: RefInfo, b: RefInfo): number {
+    const rank = (ref: RefInfo): number => {
+      if (ref.kind === 'remote' && ref.name.startsWith('upstream/')) return 0;
+      if (ref.kind === 'remote' && ref.name.startsWith('origin/')) return 1;
+      if (ref.kind === 'remote') return 2;
+      if (ref.kind === 'branch') return 3;
+      return 4;
+    };
+
+    const rankDiff = rank(a) - rank(b);
+    if (rankDiff !== 0) return rankDiff;
+    return a.name.localeCompare(b.name);
+  }
+
+  function preferredSourceRef(refList: RefInfo[]): string {
+    const sorted = [...refList].sort(compareRefsForCreate);
+    const preferred = sorted.find(ref => ref.kind === 'remote') ?? sorted[0];
+    return preferred?.name ?? 'HEAD';
+  }
+
+  const sortedRefsForCreate = $derived([...refs].sort(compareRefsForCreate));
+  const refItems = $derived(
+    sortedRefsForCreate.map(r => ({
+      label: r.name,
+      value: r.name,
+      detail: r.kind === 'remote' ? 'remote branch' : r.kind === 'branch' ? 'local branch' : 'tag',
+    }))
+  );
 
   function initializeGraphState(nextGraph: CommitGraphResult) {
     graphGeneration += 1;
@@ -1093,7 +1131,7 @@
       worktrees = worktreeData.worktrees;
       refs = refsData.refs;
       initializeGraphState(graphData);
-      selectedRef = refsData.refs[0]?.name ?? 'HEAD';
+      selectedRef = preferredSourceRef(refsData.refs);
 
       if (graphHasMore) {
         // Fetch total commit count in the background only when the first page is partial.
@@ -1412,6 +1450,77 @@
         }
       },
     };
+  }
+
+  async function preparePublishModal(worktreePath: string): Promise<boolean> {
+    const status = await getWorktreePushStatus(worktreePath);
+
+    if (status.detached) {
+      throw new Error('Cannot push from detached HEAD; checkout a branch first');
+    }
+
+    if (status.upstream) {
+      return false;
+    }
+
+    if (status.remotes.length === 0) {
+      throw new Error('Cannot publish branch because no remotes are configured');
+    }
+
+    publishRemotes = status.remotes;
+    publishRemote = status.suggestedRemote ?? status.remotes[0] ?? '';
+    publishBranch = status.branch ?? '';
+    publishTargetWorktreePath = worktreePath;
+    publishModalOpen = true;
+    return true;
+  }
+
+  async function runActiveWorktreeAction(action: 'fetch' | 'pull' | 'push') {
+    if (!selectedWorktree || activeIsRoot) return;
+
+    const worktreePath = selectedWorktree.path;
+    syncingAction = action;
+    try {
+      if (action === 'fetch') {
+        await fetchWorktree(worktreePath);
+        toast.success('Fetched remote changes');
+      } else if (action === 'pull') {
+        await pullWorktree(worktreePath);
+        toast.success(`Pulled ${selectedWorktree.branch ?? 'branch'}`);
+      } else {
+        const needsPublishSetup = await preparePublishModal(worktreePath);
+        if (needsPublishSetup) {
+          return;
+        }
+
+        const result = await pushWorktreeBranch(worktreePath, null);
+        toast.success(`Pushed ${result.branch}${result.upstream ? ` to ${result.upstream}` : ''}`);
+      }
+
+      await refreshWorkspaceData();
+    } catch (err) {
+      toast.error(String(err));
+    } finally {
+      syncingAction = null;
+    }
+  }
+
+  async function handleConfirmPublish() {
+    const worktreePath = publishTargetWorktreePath;
+    if (!worktreePath || !publishRemote) return;
+
+    syncingAction = 'push';
+    try {
+      const result = await pushWorktreeBranch(worktreePath, publishRemote);
+      toast.success(`Published ${result.branch}${result.upstream ? ` to ${result.upstream}` : ''}`);
+      publishModalOpen = false;
+      publishTargetWorktreePath = null;
+      await refreshWorkspaceData();
+    } catch (err) {
+      toast.error(String(err));
+    } finally {
+      syncingAction = null;
+    }
   }
 
   async function refreshWorkspaceData() {
@@ -1947,6 +2056,7 @@
             <button
               type="button"
               onclick={() => {
+                selectedRef = preferredSourceRef(refs);
                 createModalOpen = true;
                 formTouched = { branch: false, ref: false };
               }}
@@ -1971,30 +2081,52 @@
             </button>
             <button
               type="button"
-              disabled
-              class="rounded-md p-1.5 text-[var(--sg-text-faint)] opacity-50"
-              title="Fetch (coming soon)"
+              onclick={() => void runActiveWorktreeAction('fetch')}
+              disabled={!selectedWorktree || activeIsRoot || syncingAction !== null}
+              class="rounded-md p-1.5 text-[var(--sg-text-dim)] hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text)] disabled:text-[var(--sg-text-faint)] disabled:opacity-50"
+              title="Fetch remotes for active worktree"
               aria-label="Fetch"
+              data-testid="btn-fetch-active-worktree"
             >
-              <Download class="h-4 w-4" />
+              {#if syncingAction === 'fetch'}
+                <Spinner size="sm" />
+              {:else}
+                <Download class="h-4 w-4" />
+              {/if}
             </button>
             <button
               type="button"
-              disabled
-              class="rounded-md p-1.5 text-[var(--sg-text-faint)] opacity-50"
-              title="Pull active worktree branch (coming soon)"
+              onclick={() => void runActiveWorktreeAction('pull')}
+              disabled={!selectedWorktree || activeIsRoot || selectedWorktree.detached || syncingAction !== null}
+              class="rounded-md p-1.5 text-[var(--sg-text-dim)] hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text)] disabled:text-[var(--sg-text-faint)] disabled:opacity-50"
+              title={selectedWorktree?.detached
+                ? 'Pull unavailable for detached HEAD'
+                : 'Pull active worktree branch'}
               aria-label="Pull"
+              data-testid="btn-pull-active-worktree"
             >
-              <ArrowDownToLine class="h-4 w-4" />
+              {#if syncingAction === 'pull'}
+                <Spinner size="sm" />
+              {:else}
+                <ArrowDownToLine class="h-4 w-4" />
+              {/if}
             </button>
             <button
               type="button"
-              disabled
-              class="rounded-md p-1.5 text-[var(--sg-text-faint)] opacity-50"
-              title="Push active worktree branch (coming soon)"
+              onclick={() => void runActiveWorktreeAction('push')}
+              disabled={!selectedWorktree || activeIsRoot || selectedWorktree.detached || syncingAction !== null}
+              class="rounded-md p-1.5 text-[var(--sg-text-dim)] hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text)] disabled:text-[var(--sg-text-faint)] disabled:opacity-50"
+              title={selectedWorktree?.detached
+                ? 'Push unavailable for detached HEAD'
+                : 'Push active worktree branch'}
               aria-label="Push"
+              data-testid="btn-push-active-worktree"
             >
-              <ArrowUpFromLine class="h-4 w-4" />
+              {#if syncingAction === 'push'}
+                <Spinner size="sm" />
+              {:else}
+                <ArrowUpFromLine class="h-4 w-4" />
+              {/if}
             </button>
           </div>
 
@@ -2834,6 +2966,78 @@
   }}
 />
 
+{#if publishModalOpen}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4"
+    onclick={() => {
+      if (syncingAction !== 'push') {
+        publishModalOpen = false;
+      }
+    }}
+    style="animation: sg-fade-in 0.15s ease-out"
+  >
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      onclick={e => e.stopPropagation()}
+      class="w-full max-w-md rounded-xl border border-[var(--sg-border)] bg-[var(--sg-surface)] shadow-2xl"
+      style="animation: sg-slide-up 0.2s ease-out"
+    >
+      <div class="border-b border-[var(--sg-border-subtle)] px-4 py-3">
+        <p class="text-sm font-semibold text-[var(--sg-text)]">Publish branch</p>
+        <p class="mt-1 text-[10px] text-[var(--sg-text-faint)]">
+          Branch {publishBranch || 'current'} has no upstream yet. Choose where to publish.
+        </p>
+      </div>
+
+      <div class="space-y-3 px-4 py-3">
+        <div>
+          <p
+            class="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-[var(--sg-text-faint)]"
+          >
+            Remote
+          </p>
+          <Select
+            value={publishRemote}
+            options={publishRemotes.map(remote => ({ value: remote, label: remote }))}
+            onChange={next => (publishRemote = next)}
+          />
+        </div>
+
+        <p class="text-[10px] text-[var(--sg-text-faint)]">
+          This runs <span class="font-mono">git push -u {publishRemote} {publishBranch}</span>.
+        </p>
+
+        <div class="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onclick={() => {
+              publishModalOpen = false;
+            }}
+            disabled={syncingAction === 'push'}
+            class="rounded border border-[var(--sg-border)] px-3 py-1.5 text-xs text-[var(--sg-text-dim)] hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text)] disabled:opacity-40"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onclick={() => void handleConfirmPublish()}
+            disabled={!publishRemote || syncingAction === 'push'}
+            class="flex items-center gap-2 rounded-lg bg-[var(--sg-primary)] px-3 py-1.5 text-xs font-semibold text-[var(--sg-bg)] hover:bg-[var(--sg-primary-hover)] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {#if syncingAction === 'push'}
+              <Spinner size="sm" />
+            {/if}
+            Publish
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <!-- Create worktree modal -->
 {#if createModalOpen}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -2964,6 +3168,9 @@
             id="modal-source-ref"
             onselect={() => (formTouched.ref = true)}
           />
+          <p class="mt-1 text-[10px] text-[var(--sg-text-faint)]">
+            Remote branches are listed first (upstream preferred).
+          </p>
           {#if formTouched.ref && refError}
             <p class="mt-1 text-[10px] text-[var(--sg-danger)]">{refError}</p>
           {/if}

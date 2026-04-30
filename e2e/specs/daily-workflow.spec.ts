@@ -437,10 +437,9 @@ test.describe('Daily developer workflow', () => {
     const worktreeListAfter = runGit(gitRoot, ['worktree', 'list', '--porcelain']);
     expect(worktreeListAfter).not.toContain('null-pointer');
 
-    // Git: bugfix branch still exists (SproutGit removes the worktree dir and prunes the
-    // worktree ref, but does NOT delete the branch — the commit remains reachable).
+    // Git: bugfix branch is deleted with managed worktree cleanup.
     const branchesAfter = runGit(gitRoot, ['branch']);
-    expect(branchesAfter).toContain('bugfix/null-pointer');
+    expect(branchesAfter).not.toContain('bugfix/null-pointer');
 
     // Git: feature/new-dashboard worktree and branch still exist
     expect(worktreeListAfter).toContain('feature/new-dashboard');

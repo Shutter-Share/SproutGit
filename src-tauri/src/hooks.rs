@@ -92,6 +92,7 @@ pub struct HookExecutionContext {
     pub workspace_path: PathBuf,
     pub trigger_worktree_path: Option<PathBuf>,
     pub initiating_worktree_path: Option<PathBuf>,
+    pub source_ref: Option<String>,
 }
 
 #[derive(Clone)]
@@ -561,6 +562,10 @@ fn build_hook_environment(
                 .as_ref()
                 .map(|path| path.to_string_lossy().to_string())
                 .unwrap_or_default(),
+        ),
+        (
+            "SPROUTGIT_SOURCE_REF".to_string(),
+            context.source_ref.clone().unwrap_or_default(),
         ),
         ("SPROUTGIT_HOOK_ID".to_string(), hook.id.clone()),
         ("SPROUTGIT_HOOK_NAME".to_string(), hook.name.clone()),
@@ -1629,6 +1634,7 @@ pub async fn execute_workspace_hooks_for_trigger(
         workspace_path: workspace.clone(),
         trigger_worktree_path: context.trigger_worktree_path,
         initiating_worktree_path: context.initiating_worktree_path,
+        source_ref: context.source_ref,
     };
 
     let conn = connect_workspace_db(&workspace.to_string_lossy()).await?;
@@ -1983,6 +1989,7 @@ pub async fn run_workspace_hook(
             workspace_path: workspace.clone(),
             trigger_worktree_path: Some(worktree),
             initiating_worktree_path: initiating_worktree,
+            source_ref: None,
         },
         Some(&app_handle),
     )
