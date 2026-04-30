@@ -89,6 +89,63 @@ function sqlString(value: string) {
   return `'${value.replaceAll("'", "''")}'`;
 }
 
+type HookSeedInput = {
+  id: string;
+  name: string;
+  trigger: string;
+  shell: string;
+  script: string;
+  scope?: 'worktree' | 'workspace';
+  executionTarget?: 'workspace' | 'trigger_worktree' | 'initiating_worktree';
+  executionMode?: 'headless' | 'terminal_tab';
+  enabled?: 0 | 1;
+  critical?: 0 | 1;
+  keepOpenOnCompletion?: 0 | 1;
+  timeoutSeconds?: number;
+  createdAt?: number;
+  updatedAt?: number;
+};
+
+function insertHookDefinition(dbPath: string, input: HookSeedInput) {
+  const now = Math.floor(Date.now() / 1000);
+  executeSqlite(
+    dbPath,
+    [
+      'INSERT INTO hook_definitions (',
+      '  id, name, scope, trigger, execution_target, execution_mode, shell, script, enabled, critical, keep_open_on_completion, timeout_seconds, created_at, updated_at',
+      ') VALUES (',
+      `  ${sqlString(input.id)},`,
+      `  ${sqlString(input.name)},`,
+      `  ${sqlString(input.scope ?? 'workspace')},`,
+      `  ${sqlString(input.trigger)},`,
+      `  ${sqlString(input.executionTarget ?? 'trigger_worktree')},`,
+      `  ${sqlString(input.executionMode ?? 'headless')},`,
+      `  ${sqlString(input.shell)},`,
+      `  ${sqlString(input.script)},`,
+      `  ${input.enabled ?? 1},`,
+      `  ${input.critical ?? 0},`,
+      `  ${input.keepOpenOnCompletion ?? 0},`,
+      `  ${input.timeoutSeconds ?? 60},`,
+      `  ${input.createdAt ?? now},`,
+      `  ${input.updatedAt ?? now}`,
+      ');',
+    ].join('\n')
+  );
+}
+
+function insertHookDependency(dbPath: string, hookId: string, dependsOnHookId: string) {
+  executeSqlite(
+    dbPath,
+    [
+      'INSERT INTO hook_dependencies (hook_id, depends_on_hook_id)',
+      'VALUES (',
+      `  ${sqlString(hookId)},`,
+      `  ${sqlString(dependsOnHookId)}`,
+      ');',
+    ].join('\n')
+  );
+}
+
 function dailyAfterCreateHook() {
   if (process.platform === 'win32') {
     return {
@@ -127,6 +184,27 @@ function dailyAfterCreateHook() {
     script: [
       'mkdir -p "$SPROUTGIT_WORKSPACE_PATH/.sproutgit/hook-output"',
       'printf "%s\\n" "$SPROUTGIT_TRIGGER|$SPROUTGIT_WORKTREE_BRANCH|$SPROUTGIT_WORKTREE_PATH" > "$SPROUTGIT_WORKSPACE_PATH/.sproutgit/hook-output/after-create.txt"',
+    ].join('\n'),
+  };
+}
+
+function dailyAfterCreateTerminalHook(marker: string) {
+  if (process.platform === 'win32') {
+    return {
+      shell: 'powershell',
+      script: [
+        '$ErrorActionPreference = "Stop"',
+        `Write-Output "${marker}:$env:SPROUTGIT_WORKTREE_BRANCH"`,
+        'Start-Sleep -Milliseconds 300',
+      ].join('\n'),
+    };
+  }
+
+  return {
+    shell: process.platform === 'darwin' ? 'zsh' : 'bash',
+    script: [
+      `echo "${marker}:$SPROUTGIT_WORKTREE_BRANCH"`,
+      'sleep 0.3',
     ].join('\n'),
   };
 }
@@ -524,5 +602,120 @@ test.describe('Daily developer workflow', () => {
     expect(hookRows[0]?.[1]).toBe('success');
     expect(hookRows[0]?.[2]).toContain('feature-hook-smoke');
     expect(hookRows[0]?.[3] ?? '').toBe('');
+  });
+
+  test('shows terminal tab at workspace scope before any managed worktree exists', async ({
+    tauriPage,
+  }) => {
+    const repoPath = createTestRepo('daily-workspace-terminal', { extraCommits: 1 });
+
+    await importRepoViaUi(tauriPage, repoPath);
+
+    const historyTab = tauriPage.getByTestId('tab-history');
+    const changesTab = tauriPage.getByTestId('tab-changes');
+    const terminalTab = tauriPage.getByTestId('tab-terminal');
+
+    await historyTab.waitFor(DEFAULT_UI_TIMEOUT);
+    await changesTab.waitFor(DEFAULT_UI_TIMEOUT);
+    await terminalTab.waitFor(DEFAULT_UI_TIMEOUT);
+
+    expect(await historyTab.getAttribute('disabled')).not.toBeNull();
+    expect(await changesTab.getAttribute('disabled')).not.toBeNull();
+    expect(await terminalTab.getAttribute('disabled')).toBeNull();
+
+    await terminalTab.click();
+
+    await tauriPage.getByTestId('btn-add-terminal').waitFor(DEFAULT_UI_TIMEOUT);
+
+    const terminalPanels = tauriPage.locator('[data-sg-terminal] [data-pty-id]');
+    const panelCount = await terminalPanels.count();
+    expect(panelCount).toBeGreaterThanOrEqual(1);
+
+    const hasChangesEmptyState = await tauriPage.evaluate(`(() => {
+      return (document.body?.textContent ?? '').includes('Select a worktree to view changes');
+    })()`);
+    expect(hasChangesEmptyState).toBe(false);
+  });
+
+  test('runs multiple terminal hooks after create and opens named terminal sessions', async ({
+    tauriPage,
+  }) => {
+    const repoPath = createTestRepo('daily-multi-hooks', { extraCommits: 1 });
+
+    await importRepoViaUi(tauriPage, repoPath);
+
+    const workspaceParent = dirname(dirname(repoPath));
+    const workspacePath = join(workspaceParent, `${basename(repoPath)}-workspace`);
+    const stateDbPath = join(workspacePath, '.sproutgit', 'state.db');
+
+    const firstHookId = 'hook-daily-after-create-term-1';
+    const secondHookId = 'hook-daily-after-create-term-2';
+    const firstHookName = 'Daily terminal hook one';
+    const secondHookName = 'Daily terminal hook two';
+
+    const hookOne = dailyAfterCreateTerminalHook('HOOK_ONE');
+    const hookTwo = dailyAfterCreateTerminalHook('HOOK_TWO');
+
+    insertHookDefinition(stateDbPath, {
+      id: firstHookId,
+      name: firstHookName,
+      trigger: 'after_worktree_create',
+      shell: hookOne.shell,
+      script: hookOne.script,
+      scope: 'workspace',
+      executionTarget: 'trigger_worktree',
+      executionMode: 'terminal_tab',
+      keepOpenOnCompletion: 1,
+      timeoutSeconds: 90,
+    });
+
+    insertHookDefinition(stateDbPath, {
+      id: secondHookId,
+      name: secondHookName,
+      trigger: 'after_worktree_create',
+      shell: hookTwo.shell,
+      script: hookTwo.script,
+      scope: 'workspace',
+      executionTarget: 'trigger_worktree',
+      executionMode: 'terminal_tab',
+      keepOpenOnCompletion: 1,
+      timeoutSeconds: 90,
+    });
+
+    insertHookDependency(stateDbPath, secondHookId, firstHookId);
+
+    const targetBranch = 'feature/multi-hooks';
+    await createWorktreeViaUi(tauriPage, targetBranch);
+
+    const hookHeader = tauriPage.getByTestId('hook-operation-header');
+    await hookHeader.waitFor(DEFAULT_UI_TIMEOUT);
+    await expect(hookHeader).toBeVisible();
+
+    const firstSessionTab = tauriPage.locator(
+      `[data-testid="terminal-session-tab"][data-session-label^="${firstHookName} ("]`
+    );
+    const secondSessionTab = tauriPage.locator(
+      `[data-testid="terminal-session-tab"][data-session-label^="${secondHookName} ("]`
+    );
+
+    await firstSessionTab.waitFor(DEFAULT_UI_TIMEOUT);
+    await secondSessionTab.waitFor(DEFAULT_UI_TIMEOUT);
+    await expect(firstSessionTab).toBeVisible();
+    await expect(secondSessionTab).toBeVisible();
+
+    await expect(secondSessionTab).toHaveAttribute('aria-selected', 'true');
+
+    const terminalPanels = tauriPage.locator('[data-sg-terminal] [data-pty-id]');
+    const panelCount = await terminalPanels.count();
+    expect(panelCount).toBeGreaterThanOrEqual(3);
+
+    const hookRows = querySqlite(
+      stateDbPath,
+      `SELECT hook_id, status, trigger FROM hook_runs WHERE hook_id IN (${sqlString(firstHookId)}, ${sqlString(secondHookId)}) ORDER BY started_at ASC`
+    );
+    expect(hookRows.length).toBe(2);
+    expect(hookRows.map(row => row[0])).toEqual([firstHookId, secondHookId]);
+    expect(hookRows.map(row => row[1])).toEqual(['success', 'success']);
+    expect(hookRows.map(row => row[2])).toEqual(['after_worktree_create', 'after_worktree_create']);
   });
 });

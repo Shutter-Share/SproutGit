@@ -21,9 +21,11 @@
     cwd: string;
     /** Optional command block to send once the terminal is ready. */
     initialCommand?: string;
+    /** When true, terminal input is disabled and the panel is read-only. */
+    locked?: boolean;
   };
 
-  const { shell, cwd, initialCommand = '' }: Props = $props();
+  const { shell, cwd, initialCommand = '', locked = false }: Props = $props();
   const isWindows = typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent);
 
   // ── DOM & xterm refs ──────────────────────────────────────────────────────
@@ -151,6 +153,7 @@
 
     // Forward keyboard input to PTY
     term.onData(data => {
+      if (locked) return;
       if (ptyId) void terminalInput(ptyId, data);
     });
 
@@ -290,6 +293,15 @@
       class="min-h-0 flex-1"
       style="height: 100%; padding: 6px 8px; box-sizing: border-box;"
     ></div>
+
+    {#if locked}
+      <div class="absolute inset-0 z-10 bg-black/10"></div>
+      <div
+        class="pointer-events-none absolute right-3 top-3 rounded border border-[var(--sg-warning)]/35 bg-[var(--sg-warning)]/10 px-2 py-1 text-[10px] text-[var(--sg-warning)]"
+      >
+        Hook running - input locked
+      </div>
+    {/if}
 
     {#if closed}
       <div

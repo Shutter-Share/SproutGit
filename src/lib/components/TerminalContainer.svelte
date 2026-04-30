@@ -25,9 +25,20 @@
     availableShells: string[];
     cwd: string;
     launchRequest?: TerminalLaunchRequest | null;
+    forcedLayout?: Layout | null;
+    interactionLocked?: boolean;
+    lockReason?: string;
   };
 
-  const { defaultShell, availableShells, cwd, launchRequest = null }: Props = $props();
+  const {
+    defaultShell,
+    availableShells,
+    cwd,
+    launchRequest = null,
+    forcedLayout = null,
+    interactionLocked = false,
+    lockReason = 'Hook run in progress',
+  }: Props = $props();
 
   // ── Session state ─────────────────────────────────────────────────────────
   let sessions = $state<Session[]>([]);
@@ -101,6 +112,13 @@
     addSession(launchRequest.shell, launchRequest.label, launchRequest.command);
   });
 
+  $effect(() => {
+    if (!forcedLayout) return;
+    if (layout !== forcedLayout) {
+      layout = forcedLayout;
+    }
+  });
+
   function closeSession(id: string) {
     const idx = sessions.findIndex(s => s.id === id);
     sessions = sessions.filter(s => s.id !== id);
@@ -127,6 +145,7 @@
   let ctxMenu = $state<CtxMenu | null>(null);
 
   function openCtxMenu(e: MouseEvent, sessionId: string) {
+    if (interactionLocked) return;
     e.preventDefault();
     e.stopPropagation();
     ctxMenu = { sessionId, x: e.clientX, y: e.clientY };
@@ -205,6 +224,7 @@
   let tabStripEl = $state<HTMLElement | null>(null);
 
   function onTabPointerDown(e: PointerEvent, id: string) {
+    if (interactionLocked) return;
     if (e.button !== 0) return;
     dragFromId = id;
     dragPointerId = e.pointerId;
@@ -330,7 +350,7 @@
   }
 </script>
 
-<div class="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--sg-bg)]">
+<div class="relative flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--sg-bg)]">
   <!-- ── Toolbar ─────────────────────────────────────────────────────────── -->
   <div
     class="flex shrink-0 items-center gap-1 border-b border-[var(--sg-border)] bg-[var(--sg-bg)] px-1.5"
@@ -394,6 +414,8 @@
             -->
             <button
               bind:this={tabButtons[session.id]}
+              data-testid="terminal-session-tab"
+              data-session-label={session.label}
               draggable="false"
               role="tab"
               id={`terminal-tab-${session.id}`}
@@ -419,13 +441,15 @@
           <!-- Close button -->
           <button
             draggable="false"
+            disabled={interactionLocked}
             onpointerdown={e => e.stopPropagation()}
             onclick={e => {
               e.stopPropagation();
+              if (interactionLocked) return;
               closeSession(session.id);
             }}
             title="Close {session.label}"
-            class="select-none flex items-center px-1.5 text-[11px] leading-none text-[var(--sg-text-dim)] transition-colors hover:text-[var(--sg-danger)]"
+            class="select-none flex items-center px-1.5 text-[11px] leading-none text-[var(--sg-text-dim)] transition-colors hover:text-[var(--sg-danger)] disabled:cursor-not-allowed disabled:opacity-40"
             >✕</button
           >
 
@@ -443,8 +467,10 @@
     <div class="relative shrink-0">
       <button
         data-testid="btn-add-terminal"
+        disabled={interactionLocked}
         onclick={e => {
           e.stopPropagation();
+          if (interactionLocked) return;
           if (availableShells.length <= 1) {
             addSession(defaultShell);
           } else {
@@ -452,7 +478,7 @@
           }
         }}
         title="New terminal"
-        class="flex items-center gap-0.5 rounded px-2 py-1 text-[var(--sg-text-faint)] transition-colors hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text-dim)]"
+        class="flex items-center gap-0.5 rounded px-2 py-1 text-[var(--sg-text-faint)] transition-colors hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text-dim)] disabled:cursor-not-allowed disabled:opacity-50"
       >
         <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
           <path
@@ -500,11 +526,15 @@
     <!-- Layout toggles -->
     <div class="flex shrink-0 items-center gap-0.5 py-0.5">
       <button
-        onclick={() => (layout = 'tabs')}
+        disabled={Boolean(forcedLayout) || interactionLocked}
+        onclick={() => {
+          if (forcedLayout || interactionLocked) return;
+          layout = 'tabs';
+        }}
         title="Tabbed (one at a time)"
         class="rounded p-1 transition-colors {layout === 'tabs'
           ? 'bg-[var(--sg-surface-raised)] text-[var(--sg-primary)]'
-          : 'text-[var(--sg-text-faint)] hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text-dim)]'}"
+          : 'text-[var(--sg-text-faint)] hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text-dim)]'} disabled:cursor-not-allowed disabled:opacity-50"
       >
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
           <rect x="1" y="5" width="12" height="8" rx="1" stroke="currentColor" stroke-width="1.2" />
@@ -517,11 +547,15 @@
         </svg>
       </button>
       <button
-        onclick={() => (layout = 'split')}
+        disabled={Boolean(forcedLayout) || interactionLocked}
+        onclick={() => {
+          if (forcedLayout || interactionLocked) return;
+          layout = 'split';
+        }}
         title="Split (side by side)"
         class="rounded p-1 transition-colors {layout === 'split'
           ? 'bg-[var(--sg-surface-raised)] text-[var(--sg-primary)]'
-          : 'text-[var(--sg-text-faint)] hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text-dim)]'}"
+          : 'text-[var(--sg-text-faint)] hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text-dim)]'} disabled:cursor-not-allowed disabled:opacity-50"
       >
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
           <rect
@@ -545,11 +579,15 @@
         </svg>
       </button>
       <button
-        onclick={() => (layout = 'grid')}
+        disabled={Boolean(forcedLayout) || interactionLocked}
+        onclick={() => {
+          if (forcedLayout || interactionLocked) return;
+          layout = 'grid';
+        }}
         title="Grid (2-column)"
         class="rounded p-1 transition-colors {layout === 'grid'
           ? 'bg-[var(--sg-surface-raised)] text-[var(--sg-primary)]'
-          : 'text-[var(--sg-text-faint)] hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text-dim)]'}"
+          : 'text-[var(--sg-text-faint)] hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text-dim)]'} disabled:cursor-not-allowed disabled:opacity-50"
       >
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
           <rect
@@ -626,9 +664,19 @@
             shell={session.shell}
             {cwd}
             initialCommand={session.initialCommand}
+            locked={interactionLocked}
           />
         </div>
       {/each}
+    </div>
+  {/if}
+
+  {#if interactionLocked}
+    <div
+      data-testid="terminal-lock-badge"
+      class="absolute top-1.5 right-2 z-20 rounded border border-[var(--sg-warning)]/35 bg-[var(--sg-warning)]/10 px-2 py-0.5 text-[10px] text-[var(--sg-warning)]"
+    >
+      {lockReason}
     </div>
   {/if}
 </div>

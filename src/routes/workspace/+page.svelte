@@ -147,7 +147,29 @@
 
   let operationHooks = $state<OperationHookState[]>([]);
 
+  type HookTerminalRun = {
+    hookId: string;
+    hookName: string;
+    trigger: string;
+    cwd: string;
+    label: string;
+    running: boolean;
+  };
+
+  let hookTerminalRuns = $state<HookTerminalRun[]>([]);
+
   const shouldKeepOperationOpen = $derived(operationHooks.some(hook => hook.keepOpenOnCompletion));
+  const runningHookTerminalCount = $derived(hookTerminalRuns.filter(run => run.running).length);
+  const shouldLockHookTerminals = $derived(runningHookTerminalCount > 0);
+
+  const runningHooksByCwd = $derived.by(() => {
+    const counts: Record<string, number> = {};
+    for (const run of hookTerminalRuns) {
+      if (!run.running) continue;
+      counts[run.cwd] = (counts[run.cwd] ?? 0) + 1;
+    }
+    return counts;
+  });
 
   const hookStatusSummary = $derived.by(() => {
     const summary = {
@@ -165,44 +187,7 @@
 
     return summary;
   });
-
-  function statusLabel(status: OperationHookStatus): string {
-    switch (status) {
-      case 'pending':
-        return 'Pending';
-      case 'running':
-        return 'Running';
-      case 'success':
-        return 'Complete';
-      case 'skipped':
-        return 'Skipped';
-      case 'timed_out':
-        return 'Timed out';
-      case 'error':
-        return 'Error';
-      default:
-        return status;
-    }
-  }
-
-  function statusBadgeClass(status: OperationHookStatus): string {
-    switch (status) {
-      case 'pending':
-        return 'border-[var(--sg-border)] bg-[var(--sg-surface-raised)] text-[var(--sg-text-faint)]';
-      case 'running':
-        return 'border-[var(--sg-accent)]/40 bg-[var(--sg-accent)]/15 text-[var(--sg-accent)]';
-      case 'success':
-        return 'border-[var(--sg-primary)]/40 bg-[var(--sg-primary)]/15 text-[var(--sg-primary)]';
-      case 'skipped':
-        return 'border-[var(--sg-warning)]/40 bg-[var(--sg-warning)]/15 text-[var(--sg-warning)]';
-      case 'timed_out':
-        return 'border-[var(--sg-danger)]/40 bg-[var(--sg-danger)]/15 text-[var(--sg-danger)]';
-      case 'error':
-        return 'border-[var(--sg-danger)]/40 bg-[var(--sg-danger)]/15 text-[var(--sg-danger)]';
-      default:
-        return 'border-[var(--sg-border)] bg-[var(--sg-surface-raised)] text-[var(--sg-text-faint)]';
-    }
-  }
+  const lastOperationLog = $derived(operationLogs.at(-1) ?? null);
 
   function mapEventStatus(event: HookProgressEvent): OperationHookStatus {
     if (event.phase === 'start') return 'running';
@@ -242,6 +227,18 @@
 
   function appendOperationLog(line: string) {
     operationLogs = [...operationLogs, line];
+  }
+
+  function updateHookTerminalRun(hookId: string, updater: (current: HookTerminalRun) => HookTerminalRun) {
+    const idx = hookTerminalRuns.findIndex(run => run.hookId === hookId);
+    if (idx < 0) return;
+    const current = hookTerminalRuns[idx];
+    const next = updater(current);
+    hookTerminalRuns = [
+      ...hookTerminalRuns.slice(0, idx),
+      next,
+      ...hookTerminalRuns.slice(idx + 1),
+    ];
   }
 
   function toOperationHookState(
@@ -409,6 +406,7 @@
     activeHookName = null;
     operationLogs = [];
     operationHooks = [];
+    hookTerminalRuns = [];
 
     if (preloadedHooks.length > 0) {
       operationHooks = sortHooksByTriggerAndName(preloadedHooks).map(toOperationHookState);
@@ -461,6 +459,7 @@
       operationCompleted = false;
       activeHookName = null;
       operationHooks = [];
+      hookTerminalRuns = [];
       return;
     }
 
@@ -477,6 +476,7 @@
     operationCompleted = false;
     activeHookName = null;
     operationHooks = [];
+    hookTerminalRuns = [];
   }
 
   function handleHookProgress(event: HookProgressEvent) {
@@ -488,6 +488,10 @@
     if (event.phase === 'start') {
       activeHookName = event.hookName;
       appendOperationLog(`▶ ${event.hookName} (${event.trigger})`);
+      updateHookTerminalRun(event.hookId, current => ({
+        ...current,
+        running: true,
+      }));
       updateHookState(event.hookId, current => ({
         ...current,
         name: event.hookName,
@@ -501,6 +505,10 @@
 
     if (event.phase === 'skipped') {
       appendOperationLog(`⏭ ${event.hookName} skipped`);
+      updateHookTerminalRun(event.hookId, current => ({
+        ...current,
+        running: false,
+      }));
       updateHookState(event.hookId, current => ({
         ...current,
         name: event.hookName,
@@ -520,6 +528,10 @@
     appendOperationLog(
       `${event.status === 'success' ? '✓' : '✗'} ${event.hookName} (${event.status})`
     );
+    updateHookTerminalRun(event.hookId, current => ({
+      ...current,
+      running: false,
+    }));
 
     if (event.stdoutSnippet?.trim()) {
       appendOperationLog(`  stdout:\n${event.stdoutSnippet}`);
@@ -754,6 +766,7 @@
       return sessionStorage.getItem('sg_show_history') === 'false' ? 'changes' : 'history';
     })()
   );
+  let activeTerminalPath = $state<string | null>(null);
 
   // ── Terminal state ──────────────────────────────────────────────────────────
   let availableShells = $state<string[]>([]);
@@ -776,13 +789,14 @@
     if (
       activeTab === 'terminal' &&
       defaultShell &&
-      activeWorktreePath &&
-      !pathsEqual(activeWorktreePath, workspace?.rootPath) &&
-      !terminalInitializedPaths.has(activeWorktreePath)
+      activeTerminalPath &&
+      !terminalInitializedPaths.has(activeTerminalPath)
     ) {
-      terminalInitializedPaths = new Set([...terminalInitializedPaths, activeWorktreePath]);
+      terminalInitializedPaths = new Set([...terminalInitializedPaths, activeTerminalPath]);
     }
   });
+
+  const canUseWorktreeViews = $derived(Boolean(selectedWorktree && !activeIsRoot));
 
   // Per-worktree change counts for sidebar badges
   let worktreeChangeCounts = $state<Record<string, number>>({});
@@ -1189,6 +1203,7 @@
         worktreeData.worktrees.find(wt => !pathsEqual(wt.path, status.rootPath))?.path ??
         worktreeData.worktrees[0]?.path ??
         null;
+      activeTerminalPath = activeWorktreePath ?? status.workspacePath;
       // (activeTab is already initialised from sessionStorage at declaration time.)
 
       // Load available shells and the user's default shell preference
@@ -1264,6 +1279,7 @@
           worktrees.find(wt => !pathsEqual(wt.path, currentWorkspace.rootPath))?.path ??
           worktrees[0]?.path ??
           null;
+        activeTerminalPath = activeWorktreePath ?? currentWorkspace.workspacePath;
       } catch {
         const fallbackWorktree: WorktreeInfo = {
           path: normalizedCreatedPath,
@@ -1276,6 +1292,7 @@
           fallbackWorktree,
         ];
         activeWorktreePath = fallbackWorktree.path;
+        activeTerminalPath = fallbackWorktree.path;
       }
 
       newBranch = '';
@@ -1304,25 +1321,62 @@
     // (Linux). Compare against existing worktree paths case-insensitively
     // through `pathsEqual()` / `pathKey()` to tolerate Windows differences.
     const cwd = normalizePathSeparators(event.cwd);
-    // Set the active worktree FIRST so the lazy-init $effect (which may fire between
-    // individual assignments in an async callback context) always sees the correct
-    // worktree path and does not add the previously-active worktree to terminalInitializedPaths.
-    activeWorktreePath = cwd;
+    const matchedWorktree = findPath(worktrees, wt => wt.path, cwd);
+    const locationLabel = pathsEqual(cwd, workspace?.workspacePath)
+      ? 'workspace'
+      : matchedWorktree?.branch ?? cwd.split('/').pop() ?? 'worktree';
+    const sessionLabel = `${event.hookName} (${locationLabel})`;
+
+    if (matchedWorktree) {
+      activeWorktreePath = matchedWorktree.path;
+    }
+
     activeTab = 'terminal';
+    activeTerminalPath = cwd;
+
+    const existingRun = hookTerminalRuns.find(run => run.hookId === event.hookId);
+    if (existingRun) {
+      hookTerminalRuns = hookTerminalRuns.map(run =>
+        run.hookId === event.hookId
+          ? {
+              ...run,
+              hookName: event.hookName,
+              trigger: event.trigger,
+              cwd,
+              label: sessionLabel,
+              running: true,
+            }
+          : run
+      );
+    } else {
+      hookTerminalRuns = [
+        ...hookTerminalRuns,
+        {
+          hookId: event.hookId,
+          hookName: event.hookName,
+          trigger: event.trigger,
+          cwd,
+          label: sessionLabel,
+          running: true,
+        },
+      ];
+    }
+
     // Ensure the TerminalContainer for this worktree is in the DOM.
     if (!terminalInitializedPaths.has(cwd)) {
       terminalInitializedPaths = new Set([...terminalInitializedPaths, cwd]);
     }
+
     // Set the launch request for the TerminalContainer to pick up the command
     hookTerminalLaunchRequest = {
       id: `${event.hookId}-${Date.now()}`,
       cwd,
       shell: event.shell,
-      label: event.hookName,
+      label: sessionLabel,
       command: event.command,
     };
     appendOperationLog(
-      `Opened ${event.hookName} in the ${cwd.split('/').pop() ?? 'worktree'} terminal.`
+      `Opened ${event.hookName} in ${locationLabel} terminal.`
     );
   }
 
@@ -1471,6 +1525,7 @@
               worktrees.find(w => !pathsEqual(w.path, workspace!.rootPath))?.path ??
               worktrees[0]?.path ??
               null;
+            activeTerminalPath = activeWorktreePath ?? workspace!.workspacePath;
           }
         } catch (err) {
           failOperation(String(err));
@@ -1798,6 +1853,7 @@
         icon: '⇄',
         action: () => {
           activeWorktreePath = wt.path;
+          activeTerminalPath = wt.path;
         },
         disabled: isActive,
       },
@@ -1820,6 +1876,7 @@
         icon: '⎋',
         action: () => {
           activeWorktreePath = wt.path;
+          activeTerminalPath = wt.path;
           actionRef = '';
           // Focus the action ref input
           requestAnimationFrame(() => document.getElementById('action-ref')?.focus());
@@ -1840,6 +1897,7 @@
       icon: '▶',
       action: () => {
         activeWorktreePath = wt.path;
+        activeTerminalPath = wt.path;
         hooksModalOpen = true;
       },
     });
@@ -2251,6 +2309,7 @@
                 tabindex={isActive ? 0 : -1}
                 onclick={() => {
                   activeWorktreePath = row.wt.path;
+                  activeTerminalPath = row.wt.path;
                 }}
                 oncontextmenu={e => handleWorktreeContextMenu(row.wt, e, row.section)}
               >
@@ -2345,17 +2404,21 @@
       <!-- Main content area -->
       <section class="flex min-w-0 flex-1 flex-col overflow-hidden bg-[var(--sg-bg)]">
         <!-- View toggles (history / changes / terminal) -->
-        {#if selectedWorktree && !activeIsRoot}
+        {#if workspace}
           <div
             class="flex items-center gap-0.5 border-b border-[var(--sg-border)] bg-[var(--sg-surface)] px-3"
           >
             <button
-              onclick={() => (activeTab = 'history')}
+              onclick={() => {
+                if (!canUseWorktreeViews) return;
+                activeTab = 'history';
+              }}
+              disabled={!canUseWorktreeViews}
               data-testid="tab-history"
               class="relative px-3 py-2 text-xs font-medium transition-colors {activeTab ===
               'history'
                 ? 'text-[var(--sg-primary)]'
-                : 'text-[var(--sg-text-dim)] hover:text-[var(--sg-text)]'}"
+                : 'text-[var(--sg-text-dim)] hover:text-[var(--sg-text)]'} disabled:cursor-not-allowed disabled:opacity-50"
             >
               History
               {#if activeTab === 'history'}
@@ -2365,12 +2428,16 @@
               {/if}
             </button>
             <button
-              onclick={() => (activeTab = 'changes')}
+              onclick={() => {
+                if (!canUseWorktreeViews) return;
+                activeTab = 'changes';
+              }}
+              disabled={!canUseWorktreeViews}
               data-testid="tab-changes"
               class="relative flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors {activeTab ===
               'changes'
                 ? 'text-[var(--sg-primary)]'
-                : 'text-[var(--sg-text-dim)] hover:text-[var(--sg-text)]'}"
+                : 'text-[var(--sg-text-dim)] hover:text-[var(--sg-text)]'} disabled:cursor-not-allowed disabled:opacity-50"
             >
               Changes
               {#if worktreeStatus.length > 0}
@@ -2387,7 +2454,11 @@
               {/if}
             </button>
             <button
-              onclick={() => (activeTab = 'terminal')}
+              onclick={() => {
+                activeTab = 'terminal';
+                activeTerminalPath =
+                  activeTerminalPath ?? activeWorktreePath ?? workspace?.workspacePath ?? null;
+              }}
               data-testid="tab-terminal"
               class="relative px-3 py-2 text-xs font-medium transition-colors {activeTab ===
               'terminal'
@@ -2401,6 +2472,57 @@
                 ></span>
               {/if}
             </button>
+          </div>
+        {/if}
+
+        {#if operationStatus}
+          <div
+            data-testid="hook-operation-header"
+            class="flex items-center justify-between gap-3 border-b border-[var(--sg-border)] bg-[var(--sg-surface-raised)] px-3 py-2"
+          >
+            <div class="min-w-0">
+              <p class="truncate text-xs font-semibold text-[var(--sg-text)]">{operationStatus.title}</p>
+              <p class="truncate text-[10px] text-[var(--sg-text-faint)]">
+                {#if operationCompleted}
+                  {operationStatus.detail} Completed.
+                {:else if activeHookName}
+                  {operationStatus.detail} Running: {activeHookName}
+                {:else}
+                  {operationStatus.detail}
+                {/if}
+              </p>
+              {#if lastOperationLog}
+                <p class="truncate text-[10px] text-[var(--sg-text-faint)]">{lastOperationLog}</p>
+              {/if}
+              <div class="mt-1 flex flex-wrap items-center gap-1 text-[10px]">
+                <span class="rounded border border-[var(--sg-border)] bg-[var(--sg-surface)] px-1.5 py-px text-[var(--sg-text-faint)]">Pending: {hookStatusSummary.pending}</span>
+                <span class="rounded border border-[var(--sg-accent)]/40 bg-[var(--sg-accent)]/15 px-1.5 py-px text-[var(--sg-accent)]">Running: {hookStatusSummary.running}</span>
+                <span class="rounded border border-[var(--sg-primary)]/40 bg-[var(--sg-primary)]/15 px-1.5 py-px text-[var(--sg-primary)]">Complete: {hookStatusSummary.success}</span>
+                <span class="rounded border border-[var(--sg-warning)]/40 bg-[var(--sg-warning)]/15 px-1.5 py-px text-[var(--sg-warning)]">Skipped: {hookStatusSummary.skipped}</span>
+                <span class="rounded border border-[var(--sg-danger)]/40 bg-[var(--sg-danger)]/15 px-1.5 py-px text-[var(--sg-danger)]">Errors: {hookStatusSummary.error + hookStatusSummary.timed_out}</span>
+              </div>
+            </div>
+            <div class="flex shrink-0 items-center gap-2">
+              <button
+                data-testid="hook-operation-show-terminals"
+                onclick={() => {
+                  activeTab = 'terminal';
+                  activeTerminalPath =
+                    activeTerminalPath ?? activeWorktreePath ?? workspace?.workspacePath ?? null;
+                }}
+                class="rounded border border-[var(--sg-border)] px-2 py-1 text-[10px] text-[var(--sg-text-dim)] hover:bg-[var(--sg-surface)] hover:text-[var(--sg-text)]"
+              >
+                Show terminals
+              </button>
+              {#if operationError || operationCompleted}
+                <button
+                  onclick={() => endOperation(true)}
+                  class="rounded border border-[var(--sg-border)] px-2 py-1 text-[10px] text-[var(--sg-text-dim)] hover:bg-[var(--sg-surface)] hover:text-[var(--sg-text)]"
+                >
+                  {operationError ? 'Dismiss' : 'Close'}
+                </button>
+              {/if}
+            </div>
           </div>
         {/if}
 
@@ -2798,6 +2920,10 @@
             <div class="flex flex-1 items-center justify-center">
               <p class="text-sm text-[var(--sg-text-faint)]">No shell detected on this system</p>
             </div>
+          {:else if activeTab === 'terminal' && !activeTerminalPath}
+            <div class="flex flex-1 items-center justify-center">
+              <p class="text-sm text-[var(--sg-text-faint)]">Select a worktree or workspace terminal target</p>
+            </div>
           {:else if activeTab !== 'terminal'}
             <div class="flex flex-1 items-center justify-center">
               <p class="text-sm text-[var(--sg-text-faint)]">Select a worktree to view changes</p>
@@ -2811,7 +2937,7 @@
         {#each [...terminalInitializedPaths] as wtPath (wtPath)}
           <div
             class="flex min-h-0 flex-1 flex-col overflow-hidden"
-            style:display={activeTab === 'terminal' && activeWorktreePath === wtPath
+            style:display={activeTab === 'terminal' && activeTerminalPath === wtPath
               ? 'flex'
               : 'none'}
           >
@@ -2820,6 +2946,11 @@
               {availableShells}
               cwd={wtPath}
               launchRequest={hookTerminalLaunchRequest}
+              forcedLayout={shouldLockHookTerminals ? 'grid' : null}
+              interactionLocked={Boolean(runningHooksByCwd[wtPath])}
+              lockReason={activeHookName
+                ? `Running ${activeHookName} (input locked)`
+                : 'Hook run in progress (input locked)'}
             />
           </div>
         {/each}
@@ -2837,156 +2968,6 @@
     onconfirm={confirmDialog.onconfirm}
     oncancel={() => (confirmDialog = null)}
   />
-{/if}
-
-{#if operationStatus}
-  <div class="fixed inset-0 z-[80] bg-black/45"></div>
-  <div
-    class="fixed inset-0 z-[90] flex items-center justify-center p-4"
-    style="animation: sg-fade-in 0.2s ease-out"
-  >
-    <div
-      class="w-[min(940px,98vw)] rounded-xl border border-[var(--sg-border)] bg-[var(--sg-surface)] px-4 py-4 shadow-xl"
-    >
-      <div class="flex items-center gap-3">
-        {#if operationCompleted}
-          <div
-            class="flex h-8 w-8 items-center justify-center rounded-full border border-[var(--sg-primary)]/40 bg-[var(--sg-primary)]/15 text-[var(--sg-primary)]"
-          >
-            <svg
-              class="h-4 w-4"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            >
-              <path d="m5 12 5 5L20 7"></path>
-            </svg>
-          </div>
-        {:else}
-          <Spinner size="md" />
-        {/if}
-        <div>
-          <p class="text-sm font-semibold text-[var(--sg-text)]">{operationStatus.title}</p>
-          <p class="mt-0.5 text-xs text-[var(--sg-text-dim)]">
-            {#if operationCompleted}
-              {operationStatus.detail} Completed.
-            {:else}
-              {operationStatus.detail}
-            {/if}
-          </p>
-        </div>
-      </div>
-      {#if activeHookName}
-        <p class="mt-3 text-xs text-[var(--sg-primary)]">Running hook: {activeHookName}</p>
-      {/if}
-      {#if operationError}
-        <div
-          class="mt-3 rounded border border-[var(--sg-danger)]/35 bg-[var(--sg-danger)]/10 px-3 py-2"
-        >
-          <p class="text-xs font-medium text-[var(--sg-danger)]">Operation failed</p>
-          <p class="mt-0.5 text-[11px] text-[var(--sg-text-dim)]">{operationError}</p>
-        </div>
-      {/if}
-      <div class="mt-3 grid gap-3 lg:grid-cols-[1.2fr,1fr]">
-        <div
-          class="max-h-[340px] overflow-auto rounded border border-[var(--sg-border-subtle)] bg-[var(--sg-surface-raised)] p-2.5"
-        >
-          <div class="mb-2 flex flex-wrap items-center gap-1.5 text-[10px]">
-            <span
-              class="rounded border border-[var(--sg-border)] bg-[var(--sg-surface)] px-1.5 py-px text-[var(--sg-text-faint)]"
-              >Pending: {hookStatusSummary.pending}</span
-            >
-            <span
-              class="rounded border border-[var(--sg-accent)]/40 bg-[var(--sg-accent)]/15 px-1.5 py-px text-[var(--sg-accent)]"
-              >Running: {hookStatusSummary.running}</span
-            >
-            <span
-              class="rounded border border-[var(--sg-primary)]/40 bg-[var(--sg-primary)]/15 px-1.5 py-px text-[var(--sg-primary)]"
-              >Complete: {hookStatusSummary.success}</span
-            >
-            <span
-              class="rounded border border-[var(--sg-warning)]/40 bg-[var(--sg-warning)]/15 px-1.5 py-px text-[var(--sg-warning)]"
-              >Skipped: {hookStatusSummary.skipped}</span
-            >
-            <span
-              class="rounded border border-[var(--sg-danger)]/40 bg-[var(--sg-danger)]/15 px-1.5 py-px text-[var(--sg-danger)]"
-              >Errors: {hookStatusSummary.error + hookStatusSummary.timed_out}</span
-            >
-          </div>
-          {#if operationHooks.length === 0}
-            <p class="text-[10px] text-[var(--sg-text-faint)]">
-              No hooks registered for this operation.
-            </p>
-          {:else}
-            <div class="space-y-2">
-              {#each operationHooks as hook (hook.id)}
-                <div class="rounded border border-[var(--sg-border)] bg-[var(--sg-surface)] p-2">
-                  <div class="flex items-start justify-between gap-2">
-                    <div class="min-w-0">
-                      <p class="truncate text-xs font-medium text-[var(--sg-text)]">{hook.name}</p>
-                      <p class="mt-0.5 text-[10px] text-[var(--sg-text-faint)]">{hook.trigger}</p>
-                    </div>
-                    <span
-                      class={`shrink-0 rounded border px-1.5 py-px text-[10px] ${statusBadgeClass(hook.status)}`}
-                    >
-                      {statusLabel(hook.status)}
-                    </span>
-                  </div>
-                  <div
-                    class="mt-1.5 max-h-24 overflow-auto rounded border border-[var(--sg-border-subtle)] bg-[var(--sg-bg)] p-1.5"
-                  >
-                    {#if hook.logs.length === 0}
-                      <p class="text-[10px] text-[var(--sg-text-faint)]">Waiting for output...</p>
-                    {:else}
-                      <pre
-                        class="whitespace-pre-wrap break-words font-mono text-[10px] leading-relaxed text-[var(--sg-text-dim)]">{hook.logs.join(
-                          '\n\n'
-                        )}</pre>
-                    {/if}
-                  </div>
-                </div>
-              {/each}
-            </div>
-          {/if}
-        </div>
-
-        <div
-          class="max-h-[340px] overflow-auto rounded border border-[var(--sg-border-subtle)] bg-[var(--sg-surface-raised)] p-2.5"
-        >
-          <p
-            class="mb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--sg-text-faint)]"
-          >
-            Operation Timeline
-          </p>
-          {#if operationLogs.length === 0}
-            <p class="text-[10px] text-[var(--sg-text-faint)]">Waiting for hook output...</p>
-          {:else}
-            <pre
-              class="whitespace-pre-wrap break-words font-mono text-[10px] leading-relaxed text-[var(--sg-text-dim)]">{operationLogs.join(
-                '\n'
-              )}</pre>
-          {/if}
-        </div>
-      </div>
-      {#if operationError || operationCompleted}
-        <div class="mt-3 flex justify-end">
-          <button
-            onclick={() => endOperation(true)}
-            class="rounded border border-[var(--sg-border)] px-2.5 py-1 text-xs text-[var(--sg-text-dim)] hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text)]"
-          >
-            {operationError ? 'Dismiss' : 'Close'}
-          </button>
-        </div>
-      {:else}
-        <p class="mt-3 text-[10px] text-[var(--sg-text-faint)]">
-          Please wait. This can include lifecycle hooks and git operations.
-        </p>
-      {/if}
-    </div>
-  </div>
 {/if}
 
 <WorkspaceHooksModal
