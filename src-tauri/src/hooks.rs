@@ -564,7 +564,12 @@ fn build_hook_environment(
     env
 }
 
-fn compose_terminal_command(shell: &str, env: &[(String, String)], script: &str) -> String {
+fn compose_terminal_command(
+    shell: &str,
+    env: &[(String, String)],
+    script: &str,
+    exit_after: bool,
+) -> String {
     let assignments = env
         .iter()
         .map(|(key, value)| shell_env_assignment(shell, key, value))
@@ -575,9 +580,20 @@ fn compose_terminal_command(shell: &str, env: &[(String, String)], script: &str)
     // single PTY write, and Windows PowerShell treats CR (\r) as Enter in
     // interactive mode — bare LF (\n) does not trigger line execution.
     // For POSIX shells, use newlines throughout (LF is Enter in raw PTY mode).
+    //
+    // When `exit_after` is true (i.e. keep_open_on_completion is false), we
+    // append an `exit` command so the interactive shell exits after the script
+    // completes. This is what triggers `onTerminalClosed` on the frontend,
+    // which in turn fires the `onAutoClosed` callback to remove the tab.
     if matches!(shell, "pwsh" | "powershell") {
         let script_for_pty = script.replace('\n', "\r");
-        format!("{}; {}", assignments.join("; "), script_for_pty)
+        if exit_after {
+            format!("{}; {}\rexit", assignments.join("; "), script_for_pty)
+        } else {
+            format!("{}; {}", assignments.join("; "), script_for_pty)
+        }
+    } else if exit_after {
+        format!("{}\n{}\nexit\n", assignments.join("\n"), script)
     } else {
         format!("{}\n{}\n", assignments.join("\n"), script)
     }
@@ -925,7 +941,7 @@ async fn execute_hook(
         };
 
         use tauri::Emitter;
-        let command = compose_terminal_command(&hook.shell, &env, &hook.script);
+        let command = compose_terminal_command(&hook.shell, &env, &hook.script, !hook.keep_open_on_completion);
         let emit_result = app.emit(
             "hook-terminal-launch",
             HookTerminalLaunchEvent {

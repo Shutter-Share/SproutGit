@@ -788,6 +788,10 @@ test.describe('Daily developer workflow', () => {
       timeoutSeconds: 90,
     });
 
+    // Serialize execution: keepOpen runs after autoClose, matching the multi-hooks
+    // pattern to avoid the hookTerminalLaunchRequest reactive-update race.
+    insertHookDependency(stateDbPath, keepOpenHookId, autoCloseHookId);
+
     const targetBranch = 'feature/autoclose-hooks';
     await createWorktreeViaUi(tauriPage, targetBranch);
 
@@ -798,13 +802,11 @@ test.describe('Daily developer workflow', () => {
       `[data-testid="terminal-session-tab"][data-session-label^="${keepOpenHookName} ("]`
     );
 
-    // Both tabs should initially appear while their hooks are running.
+    // autoClose hook fires first (keepOpen depends on it). Wait for its tab.
     await autoCloseSessionTab.waitFor(DEFAULT_UI_TIMEOUT);
-    await keepOpenSessionTab.waitFor(DEFAULT_UI_TIMEOUT);
-    await expect(autoCloseSessionTab).toBeVisible();
-    await expect(keepOpenSessionTab).toBeVisible();
 
-    // The auto-close session should disappear after the process exits.
+    // The auto-close session should disappear after the process exits
+    // (the backend appends `exit` to the command when keep_open_on_completion is false).
     const autoCloseDeadline = Date.now() + DEFAULT_UI_TIMEOUT;
     while (Date.now() < autoCloseDeadline) {
       const visible = await tauriPage.isVisible(
@@ -815,7 +817,9 @@ test.describe('Daily developer workflow', () => {
     }
     await expect(autoCloseSessionTab).not.toBeVisible();
 
-    // The keep-open session should still be visible.
+    // keepOpen hook runs after autoClose completes. Wait for its tab to appear
+    // and verify it remains visible (shell stays alive — no exit appended).
+    await keepOpenSessionTab.waitFor(DEFAULT_UI_TIMEOUT);
     await expect(keepOpenSessionTab).toBeVisible();
   });
 });
