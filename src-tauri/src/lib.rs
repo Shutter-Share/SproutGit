@@ -85,6 +85,25 @@ pub fn run() {
         .manage(terminal::TerminalManager::new())
         .manage(watcher::WatcherState(std::sync::Mutex::new(None)))
         .setup(|_app| {
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::Manager;
+
+                if let Some(window) = _app.get_webview_window("main") {
+                    let _ = window.with_webview(|webview| {
+                        // Keep macOS Overlay titlebar metrics deterministic across dev/release.
+                        // AppKit can otherwise switch to compact traffic-light sizing in bundled builds.
+                        #[allow(unsafe_code)]
+                        unsafe {
+                            use objc2_app_kit::{NSWindow, NSWindowToolbarStyle};
+
+                            let ns_window: &NSWindow = &*webview.ns_window().cast();
+                            ns_window.setToolbarStyle(NSWindowToolbarStyle::Unified);
+                        }
+                    });
+                }
+            }
+
             #[cfg(target_os = "windows")]
             {
                 use tauri::Manager;
