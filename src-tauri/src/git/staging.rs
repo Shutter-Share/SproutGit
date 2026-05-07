@@ -1,8 +1,8 @@
 use serde::Serialize;
 
 use crate::git::helpers::{
-    ensure_git_success, normalize_existing_path, run_git, validate_no_control_chars,
-    validate_non_option_value, GitAction,
+    ensure_git_success, normalize_existing_path, run_git, run_git_with_progress_callback,
+    validate_no_control_chars, validate_non_option_value, GitAction,
 };
 
 // ── Structs ──
@@ -254,9 +254,13 @@ pub async fn unstage_files(
 }
 
 #[tauri::command]
-pub async fn create_commit(worktree_path: String, message: String) -> Result<CommitResult, String> {
+pub async fn create_commit(
+    app_handle: tauri::AppHandle,
+    worktree_path: String,
+    message: String,
+) -> Result<CommitResult, String> {
     let wt = normalize_existing_path(&worktree_path)?;
-    let wt_str = wt.to_string_lossy();
+    let wt_str = wt.to_string_lossy().into_owned();
     let msg = validate_commit_message(&message)?;
 
     // Verify there are staged changes
@@ -268,10 +272,15 @@ pub async fn create_commit(worktree_path: String, message: String) -> Result<Com
         return Err("No staged changes to commit".to_string());
     }
 
-    // Create the commit
-    let output = run_git(
+    // Create the commit, streaming stdout/stderr to the frontend so users can
+    // see git hook output and other progress in real time.
+    let output = run_git_with_progress_callback(
         GitAction::CreateCommit,
         &["-C", &wt_str, "commit", "-m", &msg],
+        move |line| {
+            use tauri::Emitter;
+            let _ = app_handle.emit("git-op-progress", line);
+        },
     )?;
     ensure_git_success(output, "Failed to create commit")?;
 

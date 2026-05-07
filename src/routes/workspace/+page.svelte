@@ -27,6 +27,7 @@
     openInEditor,
     onHookProgress,
     onHookTerminalLaunch,
+    onGitOpProgress,
     resetWorktreeBranch,
     runWorkspaceHook,
     getWorktreeStatus,
@@ -751,6 +752,8 @@
   let statusLoading = $state(false);
   let stagingAction = $state<string | null>(null);
   let committing = $state(false);
+  let gitOpLog = $state<string[]>([]);
+  let gitOpLogEl = $state<HTMLDivElement | null>(null);
   const pendingWatcherRefreshPaths = new Set<string>();
 
   // ── Active tab ──────────────────────────────────────────────────────────────
@@ -982,8 +985,16 @@
       toast.error('Commit message is required');
       return;
     }
-    committing = true;
+    gitOpLog = [];
+    let unlisten: (() => void) | null = null;
     try {
+      unlisten = await onGitOpProgress(line => {
+        gitOpLog.push(line);
+        requestAnimationFrame(() => {
+          if (gitOpLogEl) gitOpLogEl.scrollTop = gitOpLogEl.scrollHeight;
+        });
+      });
+      committing = true;
       const result = await createCommit(selectedWorktree.path, commitMessage);
       toast.success(`Committed: ${result.subject}`);
       commitMessage = '';
@@ -993,7 +1004,9 @@
     } catch (err) {
       toast.error(String(err));
     } finally {
+      unlisten?.();
       committing = false;
+      gitOpLog = [];
       await flushQueuedWatcherRefreshes();
     }
   }
@@ -1565,8 +1578,16 @@
     if (!selectedWorktree || activeIsRoot) return;
 
     const worktreePath = selectedWorktree.path;
-    syncingAction = action;
+    gitOpLog = [];
+    let unlisten: (() => void) | null = null;
     try {
+      unlisten = await onGitOpProgress(line => {
+        gitOpLog.push(line);
+        requestAnimationFrame(() => {
+          if (gitOpLogEl) gitOpLogEl.scrollTop = gitOpLogEl.scrollHeight;
+        });
+      });
+      syncingAction = action;
       if (action === 'fetch') {
         await fetchWorktree(worktreePath);
         toast.success('Fetched remote changes');
@@ -1587,7 +1608,9 @@
     } catch (err) {
       toast.error(String(err));
     } finally {
+      unlisten?.();
       syncingAction = null;
+      gitOpLog = [];
     }
   }
 
@@ -1595,8 +1618,16 @@
     const worktreePath = publishTargetWorktreePath;
     if (!worktreePath || !publishRemote) return;
 
-    syncingAction = 'push';
+    gitOpLog = [];
+    let unlisten: (() => void) | null = null;
     try {
+      unlisten = await onGitOpProgress(line => {
+        gitOpLog.push(line);
+        requestAnimationFrame(() => {
+          if (gitOpLogEl) gitOpLogEl.scrollTop = gitOpLogEl.scrollHeight;
+        });
+      });
+      syncingAction = 'push';
       const result = await pushWorktreeBranch(worktreePath, publishRemote);
       toast.success(`Published ${result.branch}${result.upstream ? ` to ${result.upstream}` : ''}`);
       publishModalOpen = false;
@@ -1605,7 +1636,9 @@
     } catch (err) {
       toast.error(String(err));
     } finally {
+      unlisten?.();
       syncingAction = null;
+      gitOpLog = [];
     }
   }
 
@@ -2171,7 +2204,7 @@
             <button
               type="button"
               onclick={() => void runActiveWorktreeAction('fetch')}
-              disabled={!selectedWorktree || activeIsRoot || syncingAction !== null}
+              disabled={!selectedWorktree || activeIsRoot || syncingAction !== null || committing}
               class="rounded-md p-1.5 text-[var(--sg-text-dim)] hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text)] disabled:text-[var(--sg-text-faint)] disabled:opacity-50"
               title="Fetch remotes for active worktree"
               aria-label="Fetch"
@@ -2186,7 +2219,7 @@
             <button
               type="button"
               onclick={() => void runActiveWorktreeAction('pull')}
-              disabled={!selectedWorktree || activeIsRoot || selectedWorktree.detached || syncingAction !== null}
+              disabled={!selectedWorktree || activeIsRoot || selectedWorktree.detached || syncingAction !== null || committing}
               class="rounded-md p-1.5 text-[var(--sg-text-dim)] hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text)] disabled:text-[var(--sg-text-faint)] disabled:opacity-50"
               title={selectedWorktree?.detached
                 ? 'Pull unavailable for detached HEAD'
@@ -2203,7 +2236,7 @@
             <button
               type="button"
               onclick={() => void runActiveWorktreeAction('push')}
-              disabled={!selectedWorktree || activeIsRoot || selectedWorktree.detached || syncingAction !== null}
+              disabled={!selectedWorktree || activeIsRoot || selectedWorktree.detached || syncingAction !== null || committing}
               class="rounded-md p-1.5 text-[var(--sg-text-dim)] hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text)] disabled:text-[var(--sg-text-faint)] disabled:opacity-50"
               title={selectedWorktree?.detached
                 ? 'Push unavailable for detached HEAD'
@@ -2218,6 +2251,17 @@
               {/if}
             </button>
           </div>
+
+          {#if syncingAction && gitOpLog.length > 0}
+            <div
+              bind:this={gitOpLogEl}
+              class="max-h-16 overflow-auto border-b border-[var(--sg-border-subtle)] bg-[var(--sg-surface)] px-3 py-1.5"
+            >
+              {#each gitOpLog as line}
+                <p class="break-all font-mono text-[10px] text-[var(--sg-text-faint)]">{line}</p>
+              {/each}
+            </div>
+          {/if}
 
           <!-- Active worktree summary (compact, in sidebar) -->
           {#if selectedWorktree && !activeIsRoot}
@@ -2757,7 +2801,7 @@
                   ></textarea>
                   <button
                     onclick={handleCreateCommit}
-                    disabled={committing || !commitMessage.trim() || stagedFiles.length === 0}
+                    disabled={committing || !!syncingAction || !commitMessage.trim() || stagedFiles.length === 0}
                     data-testid="btn-commit"
                     class="mt-1.5 flex w-full items-center justify-center gap-2 rounded bg-[var(--sg-primary)] px-2.5 py-1.5 text-xs font-semibold text-[var(--sg-bg)] hover:bg-[var(--sg-primary-hover)] disabled:cursor-not-allowed disabled:opacity-40"
                     title={stagedFiles.length === 0
@@ -2770,6 +2814,16 @@
                       Commit{stagedFiles.length > 0 ? ` (${stagedFiles.length})` : ''}
                     {/if}
                   </button>
+                  {#if committing && gitOpLog.length > 0}
+                    <div
+                      bind:this={gitOpLogEl}
+                      class="mt-1.5 max-h-20 overflow-auto rounded border border-[var(--sg-border-subtle)] bg-[var(--sg-input-bg)] px-2 py-1"
+                    >
+                      {#each gitOpLog as line}
+                        <p class="break-all font-mono text-[10px] text-[var(--sg-text-dim)]">{line}</p>
+                      {/each}
+                    </div>
+                  {/if}
                   <p class="mt-1 text-center text-[9px] text-[var(--sg-text-faint)]">
                     Ctrl+Enter to commit · Enter for new line
                   </p>
