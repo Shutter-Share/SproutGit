@@ -1,10 +1,11 @@
 use std::collections::HashMap;
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::PathBuf;
+use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use tauri::{AppHandle, Emitter};
 
 use crate::git::helpers::{
@@ -35,6 +36,11 @@ pub fn detect_available_shells() -> Vec<String> {
 struct PtySession {
     master: Mutex<Box<dyn MasterPty + Send>>,
     writer: Mutex<Box<dyn Write + Send>>,
+    /// The spawned shell process. Stored so `close_terminal` can call `kill()`
+    /// immediately rather than relying on the shell to respond to the ConPTY
+    /// CTRL_CLOSE_EVENT.  On Windows, PowerShell can take several seconds to
+    /// handle that event; an explicit kill is unconditional and instant.
+    child: Mutex<Box<dyn Child + Send + Sync>>,
 }
 
 pub struct TerminalManager {
@@ -102,6 +108,11 @@ pub async fn list_available_shells() -> Vec<String> {
 /// Returns the PTY ID which must be used for subsequent input/resize/close calls.
 /// Emits `terminal-output-{pty_id}` events with `String` payloads (UTF-8).
 /// Emits `terminal-closed-{pty_id}` when the shell process exits.
+///
+/// When `command` is `Some`, the shell is spawned in non-interactive mode:
+/// PowerShell uses `-NonInteractive -Command <cmd>`; POSIX shells use `-c <cmd>`.
+/// The process exits automatically when the script completes, giving reliable
+/// `terminal-closed` delivery without PTY-input race conditions on Windows ConPTY.
 #[tauri::command]
 pub async fn spawn_terminal(
     app_handle: AppHandle,
@@ -110,6 +121,7 @@ pub async fn spawn_terminal(
     cwd: String,
     cols: u16,
     rows: u16,
+    command: Option<String>,
 ) -> Result<String, String> {
     let shell = validate_shell_for_terminal(&shell)?;
 
@@ -122,6 +134,91 @@ pub async fn spawn_terminal(
     }
 
     let pty_id = generate_pty_id();
+
+    // Non-interactive mode: skip the PTY entirely and run the script via a
+    // regular piped process.  On Windows ConPTY, the PTY master reader can
+    // block indefinitely after the child exits (the pseudo-console output pipe
+    // does not signal EOF until the ConPTY handle is explicitly closed), which
+    // would prevent `terminal-closed` from ever being emitted.  A plain
+    // `std::process::Command` with piped stdout/stderr exits cleanly and emits
+    // the event as soon as the process terminates.
+    if let Some(ref script) = command {
+        let mut proc_cmd = std::process::Command::new(&shell);
+        proc_cmd.current_dir(&cwd_path);
+        proc_cmd.env("GIT_TERMINAL_PROMPT", "0");
+        proc_cmd.stdout(Stdio::piped());
+        proc_cmd.stderr(Stdio::piped());
+
+        if matches!(shell.as_str(), "pwsh" | "powershell") {
+            proc_cmd.arg("-NonInteractive");
+            proc_cmd.arg("-Command");
+            proc_cmd.arg(script.as_str());
+        } else {
+            proc_cmd.arg("-c");
+            proc_cmd.arg(script.as_str());
+        }
+
+        // Suppress the console window on Windows so no extra window flashes.
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            proc_cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        let mut child = proc_cmd
+            .spawn()
+            .map_err(|e| format!("Failed to spawn shell '{shell}': {e}"))?;
+
+        let pty_id_clone = pty_id.clone();
+        let app_stdout = app_handle.clone();
+        let app_stderr = app_handle.clone();
+        let app_closed = app_handle.clone();
+
+        // Stream stdout
+        if let Some(stdout) = child.stdout.take() {
+            let id = pty_id_clone.clone();
+            std::thread::spawn(move || {
+                let reader = BufReader::new(stdout);
+                for line in reader.lines() {
+                    match line {
+                        Ok(l) => {
+                            let _ = app_stdout
+                                .emit(&format!("terminal-output-{id}"), format!("{l}\r\n"));
+                        }
+                        Err(_) => break,
+                    }
+                }
+            });
+        }
+
+        // Stream stderr
+        if let Some(stderr) = child.stderr.take() {
+            let id = pty_id_clone.clone();
+            std::thread::spawn(move || {
+                let reader = BufReader::new(stderr);
+                for line in reader.lines() {
+                    match line {
+                        Ok(l) => {
+                            let _ = app_stderr
+                                .emit(&format!("terminal-output-{id}"), format!("{l}\r\n"));
+                        }
+                        Err(_) => break,
+                    }
+                }
+            });
+        }
+
+        // Wait for exit, then fire terminal-closed
+        std::thread::spawn(move || {
+            let _ = child.wait();
+            let _ = app_closed.emit(&format!("terminal-closed-{pty_id_clone}"), ());
+        });
+
+        return Ok(pty_id);
+    }
+
+    // Interactive PTY mode (command == None) ──────────────────────────────────
 
     let pty_system = native_pty_system();
     let pair = pty_system
@@ -139,7 +236,7 @@ pub async fn spawn_terminal(
     // Set GIT_TERMINAL_PROMPT=0 so git doesn't hang waiting for interactive input
     cmd.env("GIT_TERMINAL_PROMPT", "0");
 
-    pair.slave
+    let child = pair.slave
         .spawn_command(cmd)
         .map_err(|e| format!("Failed to spawn shell '{shell}': {e}"))?;
 
@@ -156,6 +253,7 @@ pub async fn spawn_terminal(
     let session = Arc::new(PtySession {
         master: Mutex::new(pair.master),
         writer: Mutex::new(writer),
+        child: Mutex::new(child),
     });
 
     {
@@ -272,8 +370,18 @@ pub async fn close_terminal(
         .lock()
         .map_err(|_| "Failed to lock terminal sessions".to_string())?;
 
-    // Dropping the Arc (when refcount → 0) closes the master PTY and kills the child
-    sessions.remove(&pty_id);
+    if let Some(session) = sessions.remove(&pty_id) {
+        // Explicitly kill the child process before dropping the master PTY.
+        // On Windows, closing the ConPTY master sends CTRL_CLOSE_EVENT to the
+        // shell, but PowerShell can take several seconds to honour it while
+        // running exit handlers.  TerminateProcess (via kill()) is unconditional
+        // and immediate, ensuring the CWD handle is released right away — which
+        // is critical for E2E tests that delete the worktree directory next.
+        if let Ok(mut child) = session.child.lock() {
+            let _ = child.kill();
+        }
+        // `session` Arc drops here (refcount → 0): master PTY and writer are closed.
+    }
 
     Ok(())
 }

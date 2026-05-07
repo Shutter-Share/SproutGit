@@ -8,6 +8,7 @@
     shell: string;
     label: string;
     initialCommand?: string;
+    autoCloseOnExit?: boolean;
   };
 
   type TerminalLaunchRequest = {
@@ -16,6 +17,7 @@
     shell: string;
     label: string;
     command: string;
+    keepOpenOnCompletion?: boolean;
   };
 
   type Layout = 'tabs' | 'split' | 'grid';
@@ -24,7 +26,7 @@
     defaultShell: string;
     availableShells: string[];
     cwd: string;
-    launchRequest?: TerminalLaunchRequest | null;
+    launchRequests?: TerminalLaunchRequest[];
     forcedLayout?: Layout | null;
     interactionLocked?: boolean;
     lockReason?: string;
@@ -34,7 +36,7 @@
     defaultShell,
     availableShells,
     cwd,
-    launchRequest = null,
+    launchRequests = [],
     forcedLayout = null,
     interactionLocked = false,
     lockReason = 'Hook run in progress',
@@ -46,7 +48,10 @@
   let layout = $state<Layout>('tabs');
   let showAddMenu = $state(false);
   let counter = 0;
-  let lastLaunchRequestId = $state<string | null>(null);
+  // Track IDs of launch requests that have already been processed so that
+  // each entry in the `launchRequests` array is handled exactly once even
+  // when two hooks fire back-to-back and Svelte batches the prop updates.
+  const processedLaunchIds = new Set<string>();
 
   // Auto-spawn the first session when the component mounts and a default shell is available.
   // The plain (non-reactive) `_autoSpawned` flag ensures this runs only once even if
@@ -54,7 +59,11 @@
   // read inside this effect.
   let _autoSpawned = false;
   $effect(() => {
-    if (!_autoSpawned && defaultShell) {
+    const pendingForThisCwd = launchRequests.filter(
+      r => r.cwd === cwd && !processedLaunchIds.has(r.id)
+    );
+    const hasPendingLaunch = pendingForThisCwd.length > 0;
+    if (!_autoSpawned && defaultShell && !hasPendingLaunch) {
       _autoSpawned = true;
       addSession(defaultShell);
     }
@@ -93,23 +102,37 @@
     return `term-${Date.now()}-${++counter}`;
   }
 
-  function addSession(shell: string, labelOverride?: string, initialCommand?: string) {
+  function addSession(
+    shell: string,
+    labelOverride?: string,
+    initialCommand?: string,
+    autoCloseOnExit = false
+  ) {
     const count = sessions.filter(s => s.shell === shell).length;
     const fallbackLabel = count === 0 ? shell : `${shell} (${count + 1})`;
     const label = labelOverride?.trim() || fallbackLabel;
     const id = newId();
-    sessions = [...sessions, { id, shell, label, initialCommand }];
+    sessions = [...sessions, { id, shell, label, initialCommand, autoCloseOnExit }];
     activeId = id;
     showAddMenu = false;
   }
 
   $effect(() => {
-    if (!launchRequest || launchRequest.id === lastLaunchRequestId || launchRequest.cwd !== cwd) {
-      return;
-    }
+    const pending = launchRequests.filter(
+      r => r.cwd === cwd && !processedLaunchIds.has(r.id)
+    );
+    if (pending.length === 0) return;
 
-    lastLaunchRequestId = launchRequest.id;
-    addSession(launchRequest.shell, launchRequest.label, launchRequest.command);
+    _autoSpawned = true;
+    for (const req of pending) {
+      processedLaunchIds.add(req.id);
+      addSession(
+        req.shell,
+        req.label,
+        req.command,
+        !req.keepOpenOnCompletion
+      );
+    }
   });
 
   $effect(() => {
@@ -665,6 +688,8 @@
             {cwd}
             initialCommand={session.initialCommand}
             locked={interactionLocked}
+            autoCloseOnExit={session.autoCloseOnExit}
+            onAutoClosed={() => closeSession(session.id)}
           />
         </div>
       {/each}
