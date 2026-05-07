@@ -5,7 +5,7 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use tauri::{AppHandle, Emitter};
 
 use crate::git::helpers::{
@@ -36,6 +36,11 @@ pub fn detect_available_shells() -> Vec<String> {
 struct PtySession {
     master: Mutex<Box<dyn MasterPty + Send>>,
     writer: Mutex<Box<dyn Write + Send>>,
+    /// The spawned shell process. Stored so `close_terminal` can call `kill()`
+    /// immediately rather than relying on the shell to respond to the ConPTY
+    /// CTRL_CLOSE_EVENT.  On Windows, PowerShell can take several seconds to
+    /// handle that event; an explicit kill is unconditional and instant.
+    child: Mutex<Box<dyn Child + Send + Sync>>,
 }
 
 pub struct TerminalManager {
@@ -231,7 +236,7 @@ pub async fn spawn_terminal(
     // Set GIT_TERMINAL_PROMPT=0 so git doesn't hang waiting for interactive input
     cmd.env("GIT_TERMINAL_PROMPT", "0");
 
-    pair.slave
+    let child = pair.slave
         .spawn_command(cmd)
         .map_err(|e| format!("Failed to spawn shell '{shell}': {e}"))?;
 
@@ -248,6 +253,7 @@ pub async fn spawn_terminal(
     let session = Arc::new(PtySession {
         master: Mutex::new(pair.master),
         writer: Mutex::new(writer),
+        child: Mutex::new(child),
     });
 
     {
@@ -364,8 +370,18 @@ pub async fn close_terminal(
         .lock()
         .map_err(|_| "Failed to lock terminal sessions".to_string())?;
 
-    // Dropping the Arc (when refcount → 0) closes the master PTY and kills the child
-    sessions.remove(&pty_id);
+    if let Some(session) = sessions.remove(&pty_id) {
+        // Explicitly kill the child process before dropping the master PTY.
+        // On Windows, closing the ConPTY master sends CTRL_CLOSE_EVENT to the
+        // shell, but PowerShell can take several seconds to honour it while
+        // running exit handlers.  TerminateProcess (via kill()) is unconditional
+        // and immediate, ensuring the CWD handle is released right away — which
+        // is critical for E2E tests that delete the worktree directory next.
+        if let Ok(mut child) = session.child.lock() {
+            let _ = child.kill();
+        }
+        // `session` Arc drops here (refcount → 0): master PTY and writer are closed.
+    }
 
     Ok(())
 }
