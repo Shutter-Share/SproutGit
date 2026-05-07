@@ -779,15 +779,43 @@ test.describe('Daily developer workflow', () => {
       `[data-testid="terminal-session-tab"][data-session-label^="${keepOpenHookName} ("]`
     );
 
-    // keepOpen depends on autoClose (via insertHookDependency), so the keepOpen
-    // tab only appears after autoClose finishes.  On fast CI (Linux/Ubuntu) the
-    // auto-close tab exists for only ~300 ms and may be gone before a waitFor
-    // call can observe it — waiting for it directly is a timing race.  Instead,
-    // wait for the keepOpen tab: its presence proves that autoClose already ran
-    // and completed, and the autoClose tab should already be gone by then.
+    // ── Why this test races and how we synchronise on it ──────────────────────
+    //
+    // In `terminal_tab` execution mode, the hook runner emits the
+    // `hook-terminal-launch` event and returns success IMMEDIATELY — it does
+    // NOT wait for the spawned process to exit.  `insertHookDependency` only
+    // sequences hook *dispatch order*, not *process completion*.
+    //
+    // So the actual sequence is:
+    //   1. autoClose hook dispatches → emits launch event → returns success
+    //   2. autoClose process starts running (echo + sleep 0.3 ≈ 300 ms)
+    //   3. keepOpen hook dispatches (dependency satisfied by step 1) → emits
+    //      launch event → keepOpen tab appears in the UI
+    //   4. autoClose process exits → terminal-closed event → frontend removes tab
+    //
+    // Steps 2 and 3 run in parallel.  Both tabs coexist for the duration of the
+    // autoClose process plus IPC-delivery time.  We therefore cannot treat
+    // "keepOpen tab visible" as proof that "autoClose tab is gone".
+    //
+    // We also cannot rely on `waitFor(autoCloseTab)` to APPEAR before checking
+    // its disappearance — on fast Linux/Ubuntu CI, the tab can be created and
+    // destroyed inside the polling loop of createWorktreeViaUi() above.
+    //
+    // The deterministic approach: wait for the keepOpen tab to appear (proves
+    // both hooks dispatched), then poll explicitly for the autoClose tab to
+    // disappear with a generous deadline.  We don't trust expect()'s implicit
+    // 5 s retry budget because the close pipeline (PTY exit → wait-thread →
+    // Tauri IPC → frontend listener → reactive update → DOM removal) can
+    // exceed that under macOS CI load.
+
     await keepOpenSessionTab.waitFor(DEFAULT_UI_TIMEOUT);
 
-    // autoClose tab must be gone (keep_open_on_completion=false auto-closes on exit).
+    const autoCloseSelector = `[data-testid="terminal-session-tab"][data-session-label^="${autoCloseHookName} ("]`;
+    const autoCloseDeadline = Date.now() + DEFAULT_UI_TIMEOUT;
+    while (Date.now() < autoCloseDeadline) {
+      if (!(await tauriPage.isVisible(autoCloseSelector))) break;
+      await new Promise(resolve => setTimeout(resolve, 150));
+    }
     await expect(autoCloseSessionTab).not.toBeVisible();
 
     // keepOpen tab remains visible (keep_open_on_completion=true).
