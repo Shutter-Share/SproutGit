@@ -137,26 +137,26 @@ export async function reloadToHome(tauriPage: AdapterPage) {
   // short is critical.
   //
   // Sequence rationale:
-  //  1. waitForMainWindow  — ensure the window is alive before touching it
-  //  2. ensureHome         — navigate to the home screen; on return the window
-  //                         is known-responsive (no extra waitForMainWindow needed)
-  //  3. clearCachedWorkspaceHint — fast localStorage clear
-  //  4. reload             — trigger a full webview reload
-  //  5. waitForHomeReady   — polls until document.readyState === "complete" AND
-  //                         the home-screen import button is visible; subsumes a
-  //                         separate post-reload waitForMainWindow call
+  //  1. waitForMainWindow        — ensure the window is alive before evaluating
+  //  2. clearCachedWorkspaceHint — remove sg_workspace_hint BEFORE navigation;
+  //                               this prevents the home page onMount from
+  //                               auto-navigating back to the previous workspace
+  //  3. ensureHome               — navigate to home via UI (clicks
+  //                               btn-back-projects when needed); on return,
+  //                               btn-import is visible — no extra waitForHomeReady
   //
-  // Previously steps 4 wrapped a waitForMainWindow before AND after the reload
-  // (inside performVerifiedReload).  Those two extra 45 s waits were redundant
-  // (the pre-reload wait duplicates ensureHome; the post-reload wait is subsumed
-  // by waitForHomeReady) and pushed the worst-case budget past 90 s on slow CI.
+  // A full window.location.reload() is NOT performed.  SvelteKit route
+  // navigation already tears down and remounts all page components, giving the
+  // same isolation as a hard reload.  The reload was the dominant cost on slow
+  // Windows CI runners (WebView cold-start ≈ 20–45 s), routinely pushing
+  // beforeEach past the 90 s test timeout.  The Tauri Playwright adapter
+  // cheatsheet also recommends UI-driven navigation over hard reloads as the
+  // suite default.
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       await waitForMainWindow(tauriPage, STARTUP_UI_TIMEOUT);
-      await ensureHome(tauriPage);
       await clearCachedWorkspaceHint(tauriPage);
-      await tauriPage.evaluate('window.location.reload()');
-      await waitForHomeReady(tauriPage, STARTUP_UI_TIMEOUT);
+      await ensureHome(tauriPage);
       return;
     } catch (error) {
       if (attempt === 1) {

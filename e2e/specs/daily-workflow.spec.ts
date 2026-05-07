@@ -779,24 +779,18 @@ test.describe('Daily developer workflow', () => {
       `[data-testid="terminal-session-tab"][data-session-label^="${keepOpenHookName} ("]`
     );
 
-    // autoClose hook fires first (keepOpen depends on it). Wait for its tab.
-    await autoCloseSessionTab.waitFor(DEFAULT_UI_TIMEOUT);
+    // keepOpen depends on autoClose (via insertHookDependency), so the keepOpen
+    // tab only appears after autoClose finishes.  On fast CI (Linux/Ubuntu) the
+    // auto-close tab exists for only ~300 ms and may be gone before a waitFor
+    // call can observe it — waiting for it directly is a timing race.  Instead,
+    // wait for the keepOpen tab: its presence proves that autoClose already ran
+    // and completed, and the autoClose tab should already be gone by then.
+    await keepOpenSessionTab.waitFor(DEFAULT_UI_TIMEOUT);
 
-    // The auto-close session should disappear after the process exits
-    // (the backend appends `exit` to the command when keep_open_on_completion is false).
-    const autoCloseDeadline = Date.now() + DEFAULT_UI_TIMEOUT;
-    while (Date.now() < autoCloseDeadline) {
-      const visible = await tauriPage.isVisible(
-        `[data-testid="terminal-session-tab"][data-session-label^="${autoCloseHookName} ("]`
-      );
-      if (!visible) break;
-      await new Promise(resolve => setTimeout(resolve, 150));
-    }
+    // autoClose tab must be gone (keep_open_on_completion=false auto-closes on exit).
     await expect(autoCloseSessionTab).not.toBeVisible();
 
-    // keepOpen hook runs after autoClose completes. Wait for its tab to appear
-    // and verify it remains visible (shell stays alive — no exit appended).
-    await keepOpenSessionTab.waitFor(DEFAULT_UI_TIMEOUT);
+    // keepOpen tab remains visible (keep_open_on_completion=true).
     await expect(keepOpenSessionTab).toBeVisible();
   });
 });

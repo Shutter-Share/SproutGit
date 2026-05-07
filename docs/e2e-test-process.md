@@ -19,13 +19,11 @@ To skip the one-time prebuild for faster local iteration:
 
 Each E2E spec should reset state in `beforeEach` with existing helpers:
 
-1. Reset workspace test directories.
-2. Reset isolated config DB path for the run.
-3. Return to home screen with stable UI helpers.
-4. Clear cached workspace hints in session storage.
-5. Force a verified app reload before test actions.
+1. Reset isolated config DB path for the run.
+2. Return to home screen with stable UI helpers.
+3. Reset workspace test directories.
 
-The `reloadToHome()` helper in `e2e/helpers/ui.ts` is the source of truth for the in-app reset path and performs a verified reload after clearing `sg_workspace_hint` from session storage.
+The `reloadToHome()` helper in `e2e/helpers/ui.ts` is the source of truth for the in-app reset path. It clears `sg_workspace_hint` from session storage *before* navigating to home (so the home page never auto-navigates back to the previous workspace), then uses UI-driven navigation via `ensureHome()`. A full `window.location.reload()` is intentionally avoided — SvelteKit route navigation already tears down and remounts all page components, and hard reloads take 20–45 s on slow Windows CI runners.
 
 ## Browser Dependency Setup
 
