@@ -56,7 +56,11 @@
   $effect(() => {
     if (!_autoSpawned && defaultShell) {
       _autoSpawned = true;
-      addSession(defaultShell);
+      // If a hook launch request is already queued at mount time, skip the blank
+      // default session — the launchRequest effect below will add the correct one.
+      if (!launchRequest) {
+        addSession(defaultShell);
+      }
     }
   });
 

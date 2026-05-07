@@ -42,6 +42,7 @@
     startWatchingWorktrees,
     stopWatchingWorktrees,
     onWorktreeChanged,
+    onGitRefsChanged,
     getAppSetting,
     listAvailableShells,
     type StatusFileEntry,
@@ -86,6 +87,7 @@
   let worktrees = $state<WorktreeInfo[]>([]);
   let graph = $state<CommitGraphResult | null>(null);
   let refs = $state<RefInfo[]>([]);
+  let defaultRemoteBranch = $state<string | undefined>(undefined);
   let selectedRef = $state('');
   let newBranch = $state('');
   let activeWorktreePath = $state<string | null>(null);
@@ -707,11 +709,13 @@
 
   function compareRefsForCreate(a: RefInfo, b: RefInfo): number {
     const rank = (ref: RefInfo): number => {
-      if (ref.kind === 'remote' && ref.name.startsWith('upstream/')) return 0;
-      if (ref.kind === 'remote' && ref.name.startsWith('origin/')) return 1;
-      if (ref.kind === 'remote') return 2;
-      if (ref.kind === 'branch') return 3;
-      return 4;
+      // The detected default branch (e.g. origin/main) gets highest priority.
+      if (defaultRemoteBranch && ref.name === defaultRemoteBranch) return 0;
+      if (ref.kind === 'remote' && ref.name.startsWith('upstream/')) return 1;
+      if (ref.kind === 'remote' && ref.name.startsWith('origin/')) return 2;
+      if (ref.kind === 'remote') return 3;
+      if (ref.kind === 'branch') return 4;
+      return 5;
     };
 
     const rankDiff = rank(a) - rank(b);
@@ -720,6 +724,11 @@
   }
 
   function preferredSourceRef(refList: RefInfo[]): string {
+    // If the default remote branch is known and present in the ref list, use it directly.
+    if (defaultRemoteBranch) {
+      const defaultRef = refList.find(r => r.name === defaultRemoteBranch);
+      if (defaultRef) return defaultRef.name;
+    }
     const sorted = [...refList].sort(compareRefsForCreate);
     const preferred = sorted.find(ref => ref.kind === 'remote') ?? sorted[0];
     return preferred?.name ?? 'HEAD';
@@ -1188,6 +1197,7 @@
 
       worktrees = worktreeData.worktrees;
       refs = refsData.refs;
+      defaultRemoteBranch = refsData.defaultRemoteBranch;
       initializeGraphState(graphData);
       selectedRef = preferredSourceRef(refsData.refs);
 
@@ -1249,6 +1259,9 @@
 
     creating = true;
     error = '';
+    // Close the modal immediately so the operation status banner (hook progress)
+    // is visible behind the now-dismissed dialog while hooks are running.
+    createModalOpen = false;
 
     try {
       await beginOperation(
@@ -1324,9 +1337,17 @@
 
   const unlistenHookProgress = onHookProgress(handleHookProgress);
   const unlistenHookTerminalLaunch = onHookTerminalLaunch(handleHookTerminalLaunch);
+  // When git refs change externally (e.g. terminal commits/checkouts), refresh
+  // the graph and worktrees list so the History tab stays up to date.
+  const unlistenGitRefsChanged = onGitRefsChanged(() => {
+    if (!committing && !stagingAction) {
+      void refreshWorkspaceData();
+    }
+  });
   onDestroy(() => {
     void unlistenHookProgress.then(unlisten => unlisten());
     void unlistenHookTerminalLaunch.then(unlisten => unlisten());
+    void unlistenGitRefsChanged.then(unlisten => unlisten());
   });
 
   function handleHookTerminalLaunch(event: HookTerminalLaunchEvent) {
@@ -1657,6 +1678,7 @@
     worktrees = refreshedWt.worktrees;
     initializeGraphState(refreshedGraph);
     refs = refreshedRefs.refs;
+    defaultRemoteBranch = refreshedRefs.defaultRemoteBranch;
     if (graphHasMore) {
       // Refresh total commit count in the background only when the graph is partial.
       totalCommitCount = null;
@@ -3001,9 +3023,11 @@
               cwd={wtPath}
               launchRequest={hookTerminalLaunchRequest}
               forcedLayout={shouldLockHookTerminals ? 'grid' : null}
-              interactionLocked={Boolean(runningHooksByCwd[wtPath])}
-              lockReason={activeHookName
-                ? `Running ${activeHookName} (input locked)`
+              interactionLocked={Boolean(operationStatus) || Boolean(runningHooksByCwd[wtPath])}
+              lockReason={operationStatus
+                ? activeHookName
+                  ? `Running ${activeHookName} (input locked)`
+                  : 'Operation in progress (input locked)'
                 : 'Hook run in progress (input locked)'}
             />
           </div>
@@ -3153,10 +3177,7 @@
         </button>
       </div>
       <form
-        onsubmit={async e => {
-          await createFirstWorktree(e);
-          if (!error) createModalOpen = false;
-        }}
+        onsubmit={createFirstWorktree}
         class="px-4 py-3"
       >
         <p
