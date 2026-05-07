@@ -985,15 +985,16 @@
       toast.error('Commit message is required');
       return;
     }
-    committing = true;
     gitOpLog = [];
-    const unlisten = await onGitOpProgress(line => {
-      gitOpLog = [...gitOpLog, line];
-      requestAnimationFrame(() => {
-        if (gitOpLogEl) gitOpLogEl.scrollTop = gitOpLogEl.scrollHeight;
-      });
-    });
+    let unlisten: (() => void) | null = null;
     try {
+      unlisten = await onGitOpProgress(line => {
+        gitOpLog.push(line);
+        requestAnimationFrame(() => {
+          if (gitOpLogEl) gitOpLogEl.scrollTop = gitOpLogEl.scrollHeight;
+        });
+      });
+      committing = true;
       const result = await createCommit(selectedWorktree.path, commitMessage);
       toast.success(`Committed: ${result.subject}`);
       commitMessage = '';
@@ -1003,7 +1004,7 @@
     } catch (err) {
       toast.error(String(err));
     } finally {
-      unlisten();
+      unlisten?.();
       committing = false;
       gitOpLog = [];
       await flushQueuedWatcherRefreshes();
@@ -1577,15 +1578,16 @@
     if (!selectedWorktree || activeIsRoot) return;
 
     const worktreePath = selectedWorktree.path;
-    syncingAction = action;
     gitOpLog = [];
-    const unlisten = await onGitOpProgress(line => {
-      gitOpLog = [...gitOpLog, line];
-      requestAnimationFrame(() => {
-        if (gitOpLogEl) gitOpLogEl.scrollTop = gitOpLogEl.scrollHeight;
-      });
-    });
+    let unlisten: (() => void) | null = null;
     try {
+      unlisten = await onGitOpProgress(line => {
+        gitOpLog.push(line);
+        requestAnimationFrame(() => {
+          if (gitOpLogEl) gitOpLogEl.scrollTop = gitOpLogEl.scrollHeight;
+        });
+      });
+      syncingAction = action;
       if (action === 'fetch') {
         await fetchWorktree(worktreePath);
         toast.success('Fetched remote changes');
@@ -1606,7 +1608,7 @@
     } catch (err) {
       toast.error(String(err));
     } finally {
-      unlisten();
+      unlisten?.();
       syncingAction = null;
       gitOpLog = [];
     }
@@ -1616,15 +1618,16 @@
     const worktreePath = publishTargetWorktreePath;
     if (!worktreePath || !publishRemote) return;
 
-    syncingAction = 'push';
     gitOpLog = [];
-    const unlisten = await onGitOpProgress(line => {
-      gitOpLog = [...gitOpLog, line];
-      requestAnimationFrame(() => {
-        if (gitOpLogEl) gitOpLogEl.scrollTop = gitOpLogEl.scrollHeight;
-      });
-    });
+    let unlisten: (() => void) | null = null;
     try {
+      unlisten = await onGitOpProgress(line => {
+        gitOpLog.push(line);
+        requestAnimationFrame(() => {
+          if (gitOpLogEl) gitOpLogEl.scrollTop = gitOpLogEl.scrollHeight;
+        });
+      });
+      syncingAction = 'push';
       const result = await pushWorktreeBranch(worktreePath, publishRemote);
       toast.success(`Published ${result.branch}${result.upstream ? ` to ${result.upstream}` : ''}`);
       publishModalOpen = false;
@@ -1633,7 +1636,7 @@
     } catch (err) {
       toast.error(String(err));
     } finally {
-      unlisten();
+      unlisten?.();
       syncingAction = null;
       gitOpLog = [];
     }
@@ -2201,7 +2204,7 @@
             <button
               type="button"
               onclick={() => void runActiveWorktreeAction('fetch')}
-              disabled={!selectedWorktree || activeIsRoot || syncingAction !== null}
+              disabled={!selectedWorktree || activeIsRoot || syncingAction !== null || committing}
               class="rounded-md p-1.5 text-[var(--sg-text-dim)] hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text)] disabled:text-[var(--sg-text-faint)] disabled:opacity-50"
               title="Fetch remotes for active worktree"
               aria-label="Fetch"
@@ -2216,7 +2219,7 @@
             <button
               type="button"
               onclick={() => void runActiveWorktreeAction('pull')}
-              disabled={!selectedWorktree || activeIsRoot || selectedWorktree.detached || syncingAction !== null}
+              disabled={!selectedWorktree || activeIsRoot || selectedWorktree.detached || syncingAction !== null || committing}
               class="rounded-md p-1.5 text-[var(--sg-text-dim)] hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text)] disabled:text-[var(--sg-text-faint)] disabled:opacity-50"
               title={selectedWorktree?.detached
                 ? 'Pull unavailable for detached HEAD'
@@ -2233,7 +2236,7 @@
             <button
               type="button"
               onclick={() => void runActiveWorktreeAction('push')}
-              disabled={!selectedWorktree || activeIsRoot || selectedWorktree.detached || syncingAction !== null}
+              disabled={!selectedWorktree || activeIsRoot || selectedWorktree.detached || syncingAction !== null || committing}
               class="rounded-md p-1.5 text-[var(--sg-text-dim)] hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text)] disabled:text-[var(--sg-text-faint)] disabled:opacity-50"
               title={selectedWorktree?.detached
                 ? 'Push unavailable for detached HEAD'
@@ -2798,7 +2801,7 @@
                   ></textarea>
                   <button
                     onclick={handleCreateCommit}
-                    disabled={committing || !commitMessage.trim() || stagedFiles.length === 0}
+                    disabled={committing || !!syncingAction || !commitMessage.trim() || stagedFiles.length === 0}
                     data-testid="btn-commit"
                     class="mt-1.5 flex w-full items-center justify-center gap-2 rounded bg-[var(--sg-primary)] px-2.5 py-1.5 text-xs font-semibold text-[var(--sg-bg)] hover:bg-[var(--sg-primary-hover)] disabled:cursor-not-allowed disabled:opacity-40"
                     title={stagedFiles.length === 0

@@ -309,41 +309,50 @@ where
     let cb_stdout = Arc::clone(&cb);
     let cb_stderr = Arc::clone(&cb);
 
-    fn drain_stream<R: Read>(mut stream: R, cb: Arc<impl Fn(&str) + Send + Sync>) -> Vec<u8> {
+    fn drain_stream<R: Read>(
+        mut stream: R,
+        cb: Arc<impl Fn(&str) + Send + Sync>,
+    ) -> Result<Vec<u8>, String> {
         let mut all_bytes: Vec<u8> = Vec::new();
-        let mut line_buf = String::new();
+        let mut line_buf: Vec<u8> = Vec::new();
         let mut buf = [0u8; 4096];
         loop {
             match stream.read(&mut buf) {
-                Ok(0) | Err(_) => break,
+                Ok(0) => break,
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(e) => return Err(format!("I/O error reading git stream: {e}")),
                 Ok(n) => {
                     all_bytes.extend_from_slice(&buf[..n]);
                     for &b in &buf[..n] {
                         if b == b'\n' || b == b'\r' {
-                            let trimmed = line_buf.trim().to_string();
+                            let line = String::from_utf8_lossy(&line_buf);
+                            let trimmed = line.trim();
                             if !trimmed.is_empty() {
-                                cb(&trimmed);
+                                cb(trimmed);
                             }
                             line_buf.clear();
                         } else {
-                            line_buf.push(b as char);
+                            line_buf.push(b);
                         }
                     }
                 },
             }
         }
-        let trimmed = line_buf.trim().to_string();
-        if !trimmed.is_empty() {
-            cb(&trimmed);
+        if !line_buf.is_empty() {
+            let line = String::from_utf8_lossy(&line_buf);
+            let trimmed = line.trim();
+            if !trimmed.is_empty() {
+                cb(trimmed);
+            }
         }
-        all_bytes
+        Ok(all_bytes)
     }
 
     let stdout_thread = std::thread::spawn(move || {
         if let Some(stream) = stdout_stream {
             drain_stream(stream, cb_stdout)
         } else {
-            Vec::new()
+            Ok(Vec::new())
         }
     });
 
@@ -351,7 +360,7 @@ where
         if let Some(stream) = stderr_stream {
             drain_stream(stream, cb_stderr)
         } else {
-            Vec::new()
+            Ok(Vec::new())
         }
     });
 
@@ -359,8 +368,12 @@ where
         .wait()
         .map_err(|e| format!("Failed to wait for git action '{}': {e}", action.label()))?;
 
-    let stdout_bytes = stdout_thread.join().unwrap_or_default();
-    let stderr_bytes = stderr_thread.join().unwrap_or_default();
+    let stdout_bytes = stdout_thread
+        .join()
+        .map_err(|_| format!("stdout drain thread panicked for git action '{}'", action.label()))??;
+    let stderr_bytes = stderr_thread
+        .join()
+        .map_err(|_| format!("stderr drain thread panicked for git action '{}'", action.label()))??;
 
     Ok(Output {
         status,

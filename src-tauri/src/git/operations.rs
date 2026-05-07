@@ -959,7 +959,7 @@ pub async fn fetch_worktree(
 
     let output = run_git_with_progress_callback(
         GitAction::Fetch,
-        &["-C", &wt_str, "fetch", "--all", "--prune"],
+        &["-C", &wt_str, "fetch", "--all", "--prune", "--progress"],
         move |line| {
             use tauri::Emitter;
             let _ = app_handle.emit("git-op-progress", line);
@@ -991,7 +991,7 @@ pub async fn pull_worktree(
 
     let output = run_git_with_progress_callback(
         GitAction::Pull,
-        &["-C", &wt_str, "pull", "--ff-only"],
+        &["-C", &wt_str, "pull", "--ff-only", "--progress"],
         move |line| {
             use tauri::Emitter;
             let _ = app_handle.emit("git-op-progress", line);
@@ -1020,7 +1020,7 @@ pub async fn push_worktree_branch(
         let app = app_handle.clone();
         let push_output = run_git_with_progress_callback(
             GitAction::Push,
-            &["-C", &wt_str, "push"],
+            &["-C", &wt_str, "push", "--progress"],
             move |line| {
                 use tauri::Emitter;
                 let _ = app.emit("git-op-progress", line);
@@ -1049,7 +1049,7 @@ pub async fn push_worktree_branch(
 
     let publish_output = run_git_with_progress_callback(
         GitAction::Push,
-        &["-C", &wt_str, "push", "-u", &publish_remote, &branch],
+        &["-C", &wt_str, "push", "--progress", "-u", &publish_remote, &branch],
         move |line| {
             use tauri::Emitter;
             let _ = app_handle.emit("git-op-progress", line);
