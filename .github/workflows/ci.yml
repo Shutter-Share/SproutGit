@@ -139,18 +139,24 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          choco install sqlite --no-progress -y
-
-          # Ensure sqlite3 is immediately available in this job and subsequent steps.
-          $chocoBin = Join-Path $env:ProgramData 'chocolatey\bin'
-          if (Test-Path $chocoBin) {
-            $chocoBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-            $env:PATH = "$chocoBin;$env:PATH"
-          }
-
+          # Use sqlite3 already on the runner if available; only fall back to
+          # Chocolatey when it is genuinely missing. This avoids hard failures
+          # caused by transient Chocolatey community-feed outages (503s).
           $sqlite = Get-Command sqlite3 -ErrorAction SilentlyContinue
           if (-not $sqlite) {
-            throw 'sqlite3 was not found on PATH after Chocolatey install.'
+            choco install sqlite --no-progress -y
+
+            # Ensure sqlite3 is immediately available in this job and subsequent steps.
+            $chocoBin = Join-Path $env:ProgramData 'chocolatey\bin'
+            if (Test-Path $chocoBin) {
+              $chocoBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+              $env:PATH = "$chocoBin;$env:PATH"
+            }
+
+            $sqlite = Get-Command sqlite3 -ErrorAction SilentlyContinue
+            if (-not $sqlite) {
+              throw 'sqlite3 was not found on PATH after Chocolatey install.'
+            }
           }
 
           sqlite3 --version

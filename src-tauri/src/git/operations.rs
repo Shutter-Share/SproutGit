@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 
 use crate::git::helpers::{
     ensure_directory, ensure_git_success, git_command, normalize_existing_path,
-    normalize_or_create_dir, path_to_frontend, run_git, slugify_for_path,
-    validate_non_option_value, GitAction,
+    normalize_or_create_dir, path_to_frontend, run_git, run_git_with_progress_callback,
+    slugify_for_path, validate_non_option_value, GitAction,
 };
 use crate::hooks::execute_workspace_hooks_for_trigger;
 use crate::worktree_metadata::{delete_worktree_provenance, record_worktree_creation_provenance};
@@ -954,13 +954,20 @@ pub async fn get_worktree_push_status(worktree_path: String) -> Result<WorktreeP
 }
 
 #[tauri::command]
-pub async fn fetch_worktree(worktree_path: String) -> Result<String, String> {
+pub async fn fetch_worktree(
+    app_handle: tauri::AppHandle,
+    worktree_path: String,
+) -> Result<String, String> {
     let wt_path = normalize_existing_path(&worktree_path)?;
-    let wt_str = wt_path.to_string_lossy();
+    let wt_str = wt_path.to_string_lossy().into_owned();
 
-    let output = run_git(
+    let output = run_git_with_progress_callback(
         GitAction::Fetch,
-        &["-C", &wt_str, "fetch", "--all", "--prune"],
+        &["-C", &wt_str, "fetch", "--all", "--prune", "--progress"],
+        move |line| {
+            use tauri::Emitter;
+            let _ = app_handle.emit("git-op-progress", line);
+        },
     )?;
     ensure_git_success(output, "Failed to fetch remotes")?;
 
@@ -968,9 +975,12 @@ pub async fn fetch_worktree(worktree_path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub async fn pull_worktree(worktree_path: String) -> Result<String, String> {
+pub async fn pull_worktree(
+    app_handle: tauri::AppHandle,
+    worktree_path: String,
+) -> Result<String, String> {
     let wt_path = normalize_existing_path(&worktree_path)?;
-    let wt_str = wt_path.to_string_lossy();
+    let wt_str = wt_path.to_string_lossy().into_owned();
 
     let (branch, upstream) = current_branch_and_upstream(&wt_str)?;
     let branch = branch
@@ -982,7 +992,14 @@ pub async fn pull_worktree(worktree_path: String) -> Result<String, String> {
         ));
     }
 
-    let output = run_git(GitAction::Pull, &["-C", &wt_str, "pull", "--ff-only"])?;
+    let output = run_git_with_progress_callback(
+        GitAction::Pull,
+        &["-C", &wt_str, "pull", "--ff-only", "--progress"],
+        move |line| {
+            use tauri::Emitter;
+            let _ = app_handle.emit("git-op-progress", line);
+        },
+    )?;
     ensure_git_success(output, "Failed to pull branch")?;
 
     Ok(format!("Pulled {branch}"))
@@ -990,18 +1007,27 @@ pub async fn pull_worktree(worktree_path: String) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn push_worktree_branch(
+    app_handle: tauri::AppHandle,
     worktree_path: String,
     publish_remote: Option<String>,
 ) -> Result<PushBranchResult, String> {
     let wt_path = normalize_existing_path(&worktree_path)?;
-    let wt_str = wt_path.to_string_lossy();
+    let wt_str = wt_path.to_string_lossy().into_owned();
 
     let (branch, upstream) = current_branch_and_upstream(&wt_str)?;
     let branch = branch
         .ok_or_else(|| "Cannot push from detached HEAD; checkout a branch first".to_string())?;
 
     if upstream.is_some() {
-        let push_output = run_git(GitAction::Push, &["-C", &wt_str, "push"])?;
+        let app = app_handle.clone();
+        let push_output = run_git_with_progress_callback(
+            GitAction::Push,
+            &["-C", &wt_str, "push", "--progress"],
+            move |line| {
+                use tauri::Emitter;
+                let _ = app.emit("git-op-progress", line);
+            },
+        )?;
         ensure_git_success(push_output, "Failed to push branch")?;
 
         return Ok(PushBranchResult {
@@ -1025,9 +1051,13 @@ pub async fn push_worktree_branch(
         return Err("UPSTREAM_NOT_CONFIGURED".to_string());
     };
 
-    let publish_output = run_git(
+    let publish_output = run_git_with_progress_callback(
         GitAction::Push,
-        &["-C", &wt_str, "push", "-u", &publish_remote, &branch],
+        &["-C", &wt_str, "push", "--progress", "-u", &publish_remote, &branch],
+        move |line| {
+            use tauri::Emitter;
+            let _ = app_handle.emit("git-op-progress", line);
+        },
     )?;
     ensure_git_success(publish_output, "Failed to publish branch")?;
 
