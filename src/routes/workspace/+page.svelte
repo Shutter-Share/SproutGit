@@ -786,7 +786,7 @@
     command: string;
     keepOpenOnCompletion: boolean;
   };
-  let hookTerminalLaunchRequest = $state<HookTerminalLaunchRequest | null>(null);
+  let hookTerminalLaunchRequests = $state<HookTerminalLaunchRequest[]>([]);
   // Paths whose terminal panel has been initialized at least once.
   // Once added, the TerminalPanel stays mounted (display:none when inactive)
   // so the PTY session survives tab switches and worktree switches.
@@ -1378,15 +1378,19 @@
       terminalInitializedPaths = new Set([...terminalInitializedPaths, cwd]);
     }
 
-    // Set the launch request for the TerminalContainer to pick up the command
-    hookTerminalLaunchRequest = {
-      id: `${event.hookId}-${Date.now()}`,
-      cwd,
-      shell: event.shell,
-      label: sessionLabel,
-      command: event.command,
-      keepOpenOnCompletion,
-    };
+    // Append to the queue so back-to-back hook launches are not lost when
+    // Svelte batches reactive updates and only runs effects once.
+    hookTerminalLaunchRequests = [
+      ...hookTerminalLaunchRequests,
+      {
+        id: `${event.hookId}-${Date.now()}`,
+        cwd,
+        shell: event.shell,
+        label: sessionLabel,
+        command: event.command,
+        keepOpenOnCompletion,
+      },
+    ];
     appendOperationLog(`Opened ${event.hookName} in ${locationLabel} terminal.`);
   }
 
@@ -2984,7 +2988,7 @@
               {defaultShell}
               {availableShells}
               cwd={wtPath}
-              launchRequest={hookTerminalLaunchRequest}
+              launchRequests={hookTerminalLaunchRequests}
               forcedLayout={shouldLockHookTerminals ? 'grid' : null}
               interactionLocked={Boolean(runningHooksByCwd[wtPath])}
               lockReason={activeHookName
