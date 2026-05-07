@@ -584,8 +584,13 @@ export const onWorktreeChanged = (callback: (worktreePath: string) => void): Pro
 
 export const listAvailableShells = () => invoke<string[]>('list_available_shells');
 
-export const spawnTerminal = (shell: string, cwd: string, cols: number, rows: number) =>
-  invoke<string>('spawn_terminal', { shell, cwd, cols, rows });
+export const spawnTerminal = (
+  shell: string,
+  cwd: string,
+  cols: number,
+  rows: number,
+  command?: string | null
+) => invoke<string>('spawn_terminal', { shell, cwd, cols, rows, command: command ?? null });
 
 export const terminalInput = (ptyId: string, data: string) =>
   invoke<void>('terminal_input', { ptyId, data });

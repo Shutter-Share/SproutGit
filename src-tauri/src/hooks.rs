@@ -253,10 +253,7 @@ fn trigger_supports_initiating_worktree(trigger: &str) -> bool {
     )
 }
 
-fn validate_execution_preferences(
-    trigger: &str,
-    execution_target: &str,
-) -> Result<(), String> {
+fn validate_execution_preferences(trigger: &str, execution_target: &str) -> Result<(), String> {
     if execution_target == "initiating_worktree" && !trigger_supports_initiating_worktree(trigger) {
         return Err(format!(
             "Trigger '{trigger}' cannot target the initiating worktree"
@@ -575,26 +572,30 @@ fn compose_terminal_command(
         .map(|(key, value)| shell_env_assignment(shell, key, value))
         .collect::<Vec<_>>();
 
-    // For PowerShell, use semicolons to separate env assignments and CR as the
-    // line terminator within the script body. The entire command is sent as a
-    // single PTY write, and Windows PowerShell treats CR (\r) as Enter in
-    // interactive mode — bare LF (\n) does not trigger line execution.
-    // For POSIX shells, use newlines throughout (LF is Enter in raw PTY mode).
+    // Two rendering modes depending on `exit_after`:
     //
-    // When `exit_after` is true (i.e. keep_open_on_completion is false), we
-    // append an `exit` command so the interactive shell exits after the script
-    // completes. This is what triggers `onTerminalClosed` on the frontend,
-    // which in turn fires the `onAutoClosed` callback to remove the tab.
+    // PTY-input mode (`exit_after=false`, keep_open_on_completion=true):
+    //   The command string is typed into an interactive shell via PTY write.
+    //   PowerShell uses CR (\r) as Enter; POSIX shells use LF (\n).
+    //
+    // Non-interactive mode (`exit_after=true`, keep_open_on_completion=false):
+    //   The command is passed as an argument to the shell: `powershell
+    //   -NonInteractive -Command <cmd>` or `bash -c <cmd>`.  The shell exits
+    //   automatically when the script completes, triggering the `terminal-closed`
+    //   event without any PTY-input race or ConPTY buffer-drain delay.
+    //   PowerShell uses "; " as the statement separator; POSIX uses "\n".
     if matches!(shell, "pwsh" | "powershell") {
-        let script_for_pty = script.replace('\n', "\r");
         if exit_after {
-            format!("{}; {}\rexit", assignments.join("; "), script_for_pty)
+            // Non-interactive: semicolon-joined for -NonInteractive -Command.
+            let script_for_command = script.replace('\n', "; ");
+            format!("{}; {}", assignments.join("; "), script_for_command)
         } else {
+            // PTY-input: CR as line terminator in interactive mode.
+            let script_for_pty = script.replace('\n', "\r");
             format!("{}; {}", assignments.join("; "), script_for_pty)
         }
-    } else if exit_after {
-        format!("{}\n{}\nexit\n", assignments.join("\n"), script)
     } else {
+        // POSIX: newline-separated format works for both PTY input and -c mode.
         format!("{}\n{}\n", assignments.join("\n"), script)
     }
 }
@@ -941,7 +942,12 @@ async fn execute_hook(
         };
 
         use tauri::Emitter;
-        let command = compose_terminal_command(&hook.shell, &env, &hook.script, !hook.keep_open_on_completion);
+        let command = compose_terminal_command(
+            &hook.shell,
+            &env,
+            &hook.script,
+            !hook.keep_open_on_completion,
+        );
         let emit_result = app.emit(
             "hook-terminal-launch",
             HookTerminalLaunchEvent {

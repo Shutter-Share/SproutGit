@@ -192,7 +192,19 @@
 
     // Spawn the shell
     try {
-      const id = await spawnTerminal(shell, cwd, term.cols, term.rows);
+      // When autoCloseOnExit is enabled, spawn non-interactively so the process
+      // exits naturally when the script completes.  This avoids the PTY-input
+      // timing race on Windows ConPTY (where `exit` sent via PTY may never be
+      // processed if the ConPTY output buffer isn't fully drained first).
+      const nonInteractiveCmd = autoCloseOnExit && initialCommand.trim() ? initialCommand : null;
+
+      const id = await spawnTerminal(shell, cwd, term.cols, term.rows, nonInteractiveCmd);
+
+      // If we passed the script as a shell argument, mark it sent so the PTY-
+      // input $effect below doesn't double-submit it.
+      if (nonInteractiveCmd) {
+        sentInitialCommand = true;
+      }
       ptyId = id;
 
       unlistenOutput = await onTerminalOutput(id, data => {

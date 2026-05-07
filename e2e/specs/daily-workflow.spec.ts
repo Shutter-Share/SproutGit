@@ -202,10 +202,7 @@ function dailyAfterCreateTerminalHook(marker: string) {
 
   return {
     shell: process.platform === 'darwin' ? 'zsh' : 'bash',
-    script: [
-      `echo "${marker}:$SPROUTGIT_WORKTREE_BRANCH"`,
-      'sleep 0.3',
-    ].join('\n'),
+    script: [`echo "${marker}:$SPROUTGIT_WORKTREE_BRANCH"`, 'sleep 0.3'].join('\n'),
   };
 }
 
@@ -741,9 +738,7 @@ test.describe('Daily developer workflow', () => {
     expect(hookRows.map(row => row[2])).toEqual(['after_worktree_create', 'after_worktree_create']);
   });
 
-  test('auto-closes terminal session when keepOpenOnCompletion is false', async ({
-    tauriPage,
-  }) => {
+  test('auto-closes terminal session when keepOpenOnCompletion is false', async ({ tauriPage }) => {
     const repoPath = createTestRepo('daily-autoclose-hooks', { extraCommits: 1 });
 
     await importRepoViaUi(tauriPage, repoPath);

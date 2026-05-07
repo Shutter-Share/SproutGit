@@ -102,6 +102,11 @@ pub async fn list_available_shells() -> Vec<String> {
 /// Returns the PTY ID which must be used for subsequent input/resize/close calls.
 /// Emits `terminal-output-{pty_id}` events with `String` payloads (UTF-8).
 /// Emits `terminal-closed-{pty_id}` when the shell process exits.
+///
+/// When `command` is `Some`, the shell is spawned in non-interactive mode:
+/// PowerShell uses `-NonInteractive -Command <cmd>`; POSIX shells use `-c <cmd>`.
+/// The process exits automatically when the script completes, giving reliable
+/// `terminal-closed` delivery without PTY-input race conditions on Windows ConPTY.
 #[tauri::command]
 pub async fn spawn_terminal(
     app_handle: AppHandle,
@@ -110,6 +115,7 @@ pub async fn spawn_terminal(
     cwd: String,
     cols: u16,
     rows: u16,
+    command: Option<String>,
 ) -> Result<String, String> {
     let shell = validate_shell_for_terminal(&shell)?;
 
@@ -138,6 +144,19 @@ pub async fn spawn_terminal(
 
     // Set GIT_TERMINAL_PROMPT=0 so git doesn't hang waiting for interactive input
     cmd.env("GIT_TERMINAL_PROMPT", "0");
+
+    // Non-interactive mode: pass the script as a shell argument so the process
+    // exits naturally when the script completes (no PTY-input timing required).
+    if let Some(ref script) = command {
+        if matches!(shell.as_str(), "pwsh" | "powershell") {
+            cmd.arg("-NonInteractive");
+            cmd.arg("-Command");
+            cmd.arg(script.as_str());
+        } else {
+            cmd.arg("-c");
+            cmd.arg(script.as_str());
+        }
+    }
 
     pair.slave
         .spawn_command(cmd)
