@@ -133,7 +133,12 @@ async function waitForOptionalToastMessage(
 async function performVerifiedReload(tauriPage: AdapterPage) {
   await waitForMainWindow(tauriPage, STARTUP_UI_TIMEOUT);
   await tauriPage.evaluate('window.location.reload()');
-  await waitForMainWindow(tauriPage, 15_000);
+  // Use the full STARTUP_UI_TIMEOUT here (not a shorter hardcoded value).
+  // On Windows CI the Tauri webview re-initialises from scratch after a reload
+  // and can take 20-40 s to reach document.readyState === "complete".  The
+  // previously hardcoded 15 s budget was marginal on slower runners and caused
+  // spurious beforeEach timeouts after c3453d1 increased the binary size.
+  await waitForMainWindow(tauriPage, STARTUP_UI_TIMEOUT);
 }
 
 export async function reloadToHome(tauriPage: AdapterPage) {
