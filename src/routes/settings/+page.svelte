@@ -278,7 +278,11 @@
           if (result.status === 'complete') {
             authPolling = false;
             deviceCode = null;
-            githubAuth = { authenticated: true, username: result.username ?? null, provider: 'github' };
+            githubAuth = {
+              authenticated: true,
+              username: result.username ?? null,
+              provider: 'github',
+            };
             await loadGithubEmailSuggestions();
             toast.success(`Signed in as ${result.username ?? 'GitHub user'}`);
             return;

@@ -23,7 +23,7 @@ Each E2E spec should reset state in `beforeEach` with existing helpers:
 2. Return to home screen with stable UI helpers.
 3. Reset workspace test directories.
 
-The `reloadToHome()` helper in `e2e/helpers/ui.ts` is the source of truth for the in-app reset path. It clears `sg_workspace_hint` from session storage *before* navigating to home (so the home page never auto-navigates back to the previous workspace), then uses UI-driven navigation via `ensureHome()`. A full `window.location.reload()` is intentionally avoided — SvelteKit route navigation already tears down and remounts all page components, and hard reloads take 20–45 s on slow Windows CI runners.
+The `reloadToHome()` helper in `e2e/helpers/ui.ts` is the source of truth for the in-app reset path. It clears `sg_workspace_hint` from session storage _before_ navigating to home (so the home page never auto-navigates back to the previous workspace), then uses UI-driven navigation via `ensureHome()`. A full `window.location.reload()` is intentionally avoided — SvelteKit route navigation already tears down and remounts all page components, and hard reloads take 20–45 s on slow Windows CI runners.
 
 ## Browser Dependency Setup
 

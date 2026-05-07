@@ -1053,7 +1053,15 @@ pub async fn push_worktree_branch(
 
     let publish_output = run_git_with_progress_callback(
         GitAction::Push,
-        &["-C", &wt_str, "push", "--progress", "-u", &publish_remote, &branch],
+        &[
+            "-C",
+            &wt_str,
+            "push",
+            "--progress",
+            "-u",
+            &publish_remote,
+            &branch,
+        ],
         move |line| {
             use tauri::Emitter;
             let _ = app_handle.emit("git-op-progress", line);

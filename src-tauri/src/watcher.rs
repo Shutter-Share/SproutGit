@@ -9,7 +9,9 @@ use notify_debouncer_mini::notify::RecursiveMode;
 use notify_debouncer_mini::{new_debouncer, Debouncer};
 use tauri::{AppHandle, Emitter, State};
 
-use crate::git::helpers::{git_command, normalize_existing_path, validate_no_control_chars, GitAction};
+use crate::git::helpers::{
+    git_command, normalize_existing_path, validate_no_control_chars, GitAction,
+};
 
 // ── State ──
 
@@ -88,7 +90,6 @@ fn is_gitignored_path(worktree_path: &str, path: &Path) -> bool {
     .map(|o| o.status.code() == Some(0))
     .unwrap_or(false)
 }
-
 
 /// Start watching one or more worktree directories for filesystem changes.
 /// Emits a `worktree-changed` Tauri event (payload: the worktree path) when any
@@ -187,9 +188,7 @@ pub async fn start_watching_worktrees(
                     if event_path.starts_with(wt_path.as_str()) {
                         // Skip gitignore check if the worktree is already queued
                         // (a previous event in this batch was non-ignored).
-                        if affected.contains(wt_path)
-                            || !is_gitignored_path(wt_path, event_path)
-                        {
+                        if affected.contains(wt_path) || !is_gitignored_path(wt_path, event_path) {
                             affected.insert(wt_path.clone());
                         }
                         break;
