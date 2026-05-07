@@ -791,31 +791,36 @@ test.describe('Daily developer workflow', () => {
     //   2. autoClose process starts running (echo + sleep 0.3 ≈ 300 ms)
     //   3. keepOpen hook dispatches (dependency satisfied by step 1) → emits
     //      launch event → keepOpen tab appears in the UI
-    //   4. autoClose process exits → terminal-closed event → frontend removes tab
+    //   4. autoClose process exits → terminal-closed event → frontend removes
+    //      tab.  The chain (PTY exit → wait-thread → IPC → frontend listener →
+    //      reactive update → DOM removal) is fast in practice but can exceed a
+    //      multi-second budget on loaded CI runners.
     //
-    // Steps 2 and 3 run in parallel.  Both tabs coexist for the duration of the
-    // autoClose process plus IPC-delivery time.  We therefore cannot treat
-    // "keepOpen tab visible" as proof that "autoClose tab is gone".
+    // Steps 2 and 3 run in parallel, so "keepOpen tab visible" is NOT proof
+    // that "autoClose tab is gone".  And we can't rely on `waitFor(autoCloseTab
+    // .toAppear)` either — on fast Linux CI the tab can be created and
+    // destroyed inside the polling loop of `createWorktreeViaUi()` above.
     //
-    // We also cannot rely on `waitFor(autoCloseTab)` to APPEAR before checking
-    // its disappearance — on fast Linux/Ubuntu CI, the tab can be created and
-    // destroyed inside the polling loop of createWorktreeViaUi() above.
-    //
-    // The deterministic approach: wait for the keepOpen tab to appear (proves
-    // both hooks dispatched), then poll explicitly for the autoClose tab to
-    // disappear with a generous deadline.  We don't trust expect()'s implicit
-    // 5 s retry budget because the close pipeline (PTY exit → wait-thread →
-    // Tauri IPC → frontend listener → reactive update → DOM removal) can
-    // exceed that under macOS CI load.
+    // The deterministic approach: synchronise on real backend state via
+    // `is_hook_terminal_closed`, which the spawn_terminal wait-thread updates
+    // the moment the child process exits — completely upstream of the IPC →
+    // reactive-update → DOM-removal chain that drives tab disappearance.
+    // Once that returns a non-null timestamp, we know the close pipeline is
+    // strictly downstream and assert the DOM state.
 
     await keepOpenSessionTab.waitFor(DEFAULT_UI_TIMEOUT);
 
-    const autoCloseSelector = `[data-testid="terminal-session-tab"][data-session-label^="${autoCloseHookName} ("]`;
-    const autoCloseDeadline = Date.now() + DEFAULT_UI_TIMEOUT;
-    while (Date.now() < autoCloseDeadline) {
-      if (!(await tauriPage.isVisible(autoCloseSelector))) break;
-      await new Promise(resolve => setTimeout(resolve, 150));
+    const closeDeadline = Date.now() + DEFAULT_UI_TIMEOUT;
+    let backendClosedAt: number | null = null;
+    while (Date.now() < closeDeadline) {
+      backendClosedAt = (await tauriPage.evaluate(
+        `window.__TAURI_INTERNALS__.invoke('is_hook_terminal_closed', { hookId: ${JSON.stringify(autoCloseHookId)} })`
+      )) as number | null;
+      if (backendClosedAt !== null) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
+    expect(backendClosedAt, 'backend should have recorded autoClose process exit').not.toBeNull();
+
     await expect(autoCloseSessionTab).not.toBeVisible();
 
     // keepOpen tab remains visible (keep_open_on_completion=true).

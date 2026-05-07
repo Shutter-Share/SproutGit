@@ -45,12 +45,21 @@ struct PtySession {
 
 pub struct TerminalManager {
     sessions: Arc<Mutex<HashMap<String, Arc<PtySession>>>>,
+    /// Map of hook_id → epoch milliseconds at which that hook's terminal
+    /// session exited.  Populated by the non-interactive PTY wait-thread when a
+    /// session was spawned with a `hook_id` argument.  Read by the
+    /// `is_hook_terminal_closed` command so that E2E tests (and any future UI
+    /// surfaces) can synchronise on real backend process state instead of the
+    /// long IPC chain (PTY exit → wait-thread → emit → frontend listener →
+    /// reactive update → DOM removal) that drives terminal-tab disappearance.
+    closed_hook_terminals: Arc<Mutex<HashMap<String, i64>>>,
 }
 
 impl TerminalManager {
     pub fn new() -> Self {
         Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            closed_hook_terminals: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -113,7 +122,14 @@ pub async fn list_available_shells() -> Vec<String> {
 /// PowerShell uses `-NonInteractive -Command <cmd>`; POSIX shells use `-c <cmd>`.
 /// The process exits automatically when the script completes, giving reliable
 /// `terminal-closed` delivery without PTY-input race conditions on Windows ConPTY.
+///
+/// When `hook_id` is `Some` AND `command` is `Some` (auto-close hook session),
+/// the wait-thread also records the exit timestamp (epoch ms) into
+/// `TerminalManager::closed_hook_terminals` so that
+/// [`is_hook_terminal_closed`] can report deterministic completion to callers
+/// (notably E2E tests) without polling the DOM.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn spawn_terminal(
     app_handle: AppHandle,
     state: tauri::State<'_, TerminalManager>,
@@ -122,8 +138,22 @@ pub async fn spawn_terminal(
     cols: u16,
     rows: u16,
     command: Option<String>,
+    hook_id: Option<String>,
 ) -> Result<String, String> {
     let shell = validate_shell_for_terminal(&shell)?;
+
+    let validated_hook_id = match hook_id {
+        Some(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                validate_no_control_chars(trimmed, "Hook ID")?;
+                Some(trimmed.to_string())
+            }
+        },
+        None => None,
+    };
 
     let cwd_path = PathBuf::from(cwd.trim());
     if !cwd_path.is_dir() {
@@ -185,7 +215,7 @@ pub async fn spawn_terminal(
                         Ok(l) => {
                             let _ = app_stdout
                                 .emit(&format!("terminal-output-{id}"), format!("{l}\r\n"));
-                        }
+                        },
                         Err(_) => break,
                     }
                 }
@@ -202,16 +232,30 @@ pub async fn spawn_terminal(
                         Ok(l) => {
                             let _ = app_stderr
                                 .emit(&format!("terminal-output-{id}"), format!("{l}\r\n"));
-                        }
+                        },
                         Err(_) => break,
                     }
                 }
             });
         }
 
-        // Wait for exit, then fire terminal-closed
+        // Wait for exit, then fire terminal-closed and (if this session was
+        // associated with a hook via the `hook_id` argument) record the exit
+        // timestamp so that callers polling `is_hook_terminal_closed` see a
+        // deterministic completion signal.
+        let closed_map = Arc::clone(&state.closed_hook_terminals);
+        let hook_id_for_thread = validated_hook_id.clone();
         std::thread::spawn(move || {
             let _ = child.wait();
+            if let Some(hook_id) = hook_id_for_thread {
+                let now_ms = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0);
+                if let Ok(mut map) = closed_map.lock() {
+                    map.insert(hook_id, now_ms);
+                }
+            }
             let _ = app_closed.emit(&format!("terminal-closed-{pty_id_clone}"), ());
         });
 
@@ -236,7 +280,8 @@ pub async fn spawn_terminal(
     // Set GIT_TERMINAL_PROMPT=0 so git doesn't hang waiting for interactive input
     cmd.env("GIT_TERMINAL_PROMPT", "0");
 
-    let child = pair.slave
+    let child = pair
+        .slave
         .spawn_command(cmd)
         .map_err(|e| format!("Failed to spawn shell '{shell}': {e}"))?;
 
@@ -408,4 +453,34 @@ pub async fn close_all_terminals(state: tauri::State<'_, TerminalManager>) -> Re
     sessions.clear();
 
     Ok(())
+}
+
+/// Return the epoch millisecond timestamp at which the auto-close terminal
+/// session associated with `hook_id` exited, or `None` if no such session has
+/// completed (or if the session was not spawned with a `hook_id`).
+///
+/// Provides a deterministic, IPC-free synchronisation point for callers that
+/// need to know when a hook's terminal session finished.  Without this,
+/// observers must watch the long async chain
+///     (PTY child exit → wait-thread → Tauri event → frontend listener →
+///      Svelte reactive update → DOM removal)
+/// which is fast in practice but can exceed a multi-second budget on loaded
+/// CI runners.  E2E tests use this command to remove that flake source from
+/// the auto-close hook assertion.
+#[tauri::command]
+pub async fn is_hook_terminal_closed(
+    state: tauri::State<'_, TerminalManager>,
+    hook_id: String,
+) -> Result<Option<i64>, String> {
+    let trimmed = hook_id.trim();
+    if trimmed.is_empty() {
+        return Err("Hook ID is required".to_string());
+    }
+    validate_no_control_chars(trimmed, "Hook ID")?;
+
+    let map = state
+        .closed_hook_terminals
+        .lock()
+        .map_err(|_| "Failed to lock closed_hook_terminals".to_string())?;
+    Ok(map.get(trimmed).copied())
 }

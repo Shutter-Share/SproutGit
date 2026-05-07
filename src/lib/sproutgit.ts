@@ -592,8 +592,28 @@ export const spawnTerminal = (
   cwd: string,
   cols: number,
   rows: number,
-  command?: string | null
-) => invoke<string>('spawn_terminal', { shell, cwd, cols, rows, command: command ?? null });
+  command?: string | null,
+  hookId?: string | null
+) =>
+  invoke<string>('spawn_terminal', {
+    shell,
+    cwd,
+    cols,
+    rows,
+    command: command ?? null,
+    hookId: hookId ?? null,
+  });
+
+/**
+ * Returns the epoch-ms timestamp at which the auto-close terminal session for
+ * the given hook exited, or `null` if no such session has completed yet.
+ *
+ * Provides a deterministic backend-state synchronisation point so callers do
+ * not need to observe the (PTY exit → IPC event → reactive update → DOM
+ * removal) chain that drives terminal-tab disappearance.
+ */
+export const isHookTerminalClosed = (hookId: string) =>
+  invoke<number | null>('is_hook_terminal_closed', { hookId });
 
 export const terminalInput = (ptyId: string, data: string) =>
   invoke<void>('terminal_input', { ptyId, data });

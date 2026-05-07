@@ -789,6 +789,7 @@
     label: string;
     command: string;
     keepOpenOnCompletion: boolean;
+    hookId: string;
   };
   let hookTerminalLaunchRequests = $state<HookTerminalLaunchRequest[]>([]);
   // Paths whose terminal panel has been initialized at least once.
@@ -1408,6 +1409,7 @@
         label: sessionLabel,
         command: event.command,
         keepOpenOnCompletion,
+        hookId: event.hookId,
       },
     ];
     appendOperationLog(`Opened ${event.hookName} in ${locationLabel} terminal.`);
@@ -2850,7 +2852,10 @@
                   ></textarea>
                   <button
                     onclick={handleCreateCommit}
-                    disabled={committing || !!syncingAction || !commitMessage.trim() || stagedFiles.length === 0}
+                    disabled={committing ||
+                      !!syncingAction ||
+                      !commitMessage.trim() ||
+                      stagedFiles.length === 0}
                     data-testid="btn-commit"
                     class="mt-1.5 flex w-full items-center justify-center gap-2 rounded bg-[var(--sg-primary)] px-2.5 py-1.5 text-xs font-semibold text-[var(--sg-bg)] hover:bg-[var(--sg-primary-hover)] disabled:cursor-not-allowed disabled:opacity-40"
                     title={stagedFiles.length === 0
@@ -2869,7 +2874,9 @@
                       class="mt-1.5 max-h-20 overflow-auto rounded border border-[var(--sg-border-subtle)] bg-[var(--sg-input-bg)] px-2 py-1"
                     >
                       {#each gitOpLog as line}
-                        <p class="break-all font-mono text-[10px] text-[var(--sg-text-dim)]">{line}</p>
+                        <p class="break-all font-mono text-[10px] text-[var(--sg-text-dim)]">
+                          {line}
+                        </p>
                       {/each}
                     </div>
                   {/if}

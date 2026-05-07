@@ -9,6 +9,7 @@
     label: string;
     initialCommand?: string;
     autoCloseOnExit?: boolean;
+    hookId?: string;
   };
 
   type TerminalLaunchRequest = {
@@ -18,6 +19,13 @@
     label: string;
     command: string;
     keepOpenOnCompletion?: boolean;
+    /**
+     * When set, identifies the hook that triggered this launch.  Forwarded to
+     * the backend `spawn_terminal` call so the non-interactive wait-thread can
+     * record the exit timestamp under this hook id.  Used by E2E tests to
+     * synchronise on real backend state instead of DOM transitions.
+     */
+    hookId?: string;
   };
 
   type Layout = 'tabs' | 'split' | 'grid';
@@ -106,32 +114,26 @@
     shell: string,
     labelOverride?: string,
     initialCommand?: string,
-    autoCloseOnExit = false
+    autoCloseOnExit = false,
+    hookId?: string
   ) {
     const count = sessions.filter(s => s.shell === shell).length;
     const fallbackLabel = count === 0 ? shell : `${shell} (${count + 1})`;
     const label = labelOverride?.trim() || fallbackLabel;
     const id = newId();
-    sessions = [...sessions, { id, shell, label, initialCommand, autoCloseOnExit }];
+    sessions = [...sessions, { id, shell, label, initialCommand, autoCloseOnExit, hookId }];
     activeId = id;
     showAddMenu = false;
   }
 
   $effect(() => {
-    const pending = launchRequests.filter(
-      r => r.cwd === cwd && !processedLaunchIds.has(r.id)
-    );
+    const pending = launchRequests.filter(r => r.cwd === cwd && !processedLaunchIds.has(r.id));
     if (pending.length === 0) return;
 
     _autoSpawned = true;
     for (const req of pending) {
       processedLaunchIds.add(req.id);
-      addSession(
-        req.shell,
-        req.label,
-        req.command,
-        !req.keepOpenOnCompletion
-      );
+      addSession(req.shell, req.label, req.command, !req.keepOpenOnCompletion, req.hookId);
     }
   });
 
@@ -689,6 +691,7 @@
             initialCommand={session.initialCommand}
             locked={interactionLocked}
             autoCloseOnExit={session.autoCloseOnExit}
+            hookId={session.hookId}
             onAutoClosed={() => closeSession(session.id)}
           />
         </div>

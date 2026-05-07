@@ -25,6 +25,13 @@
     locked?: boolean;
     /** When true, close the terminal tab automatically after process exit. */
     autoCloseOnExit?: boolean;
+    /**
+     * When set, identifies the hook that triggered this terminal session.
+     * Forwarded to the backend `spawn_terminal` call so the wait-thread can
+     * record the exit timestamp under this hook id (used by E2E tests to
+     * synchronise on backend state instead of DOM transitions).
+     */
+    hookId?: string;
     /** Callback invoked when auto-close is requested after process exit. */
     onAutoClosed?: () => void;
   };
@@ -35,6 +42,7 @@
     initialCommand = '',
     locked = false,
     autoCloseOnExit = false,
+    hookId,
     onAutoClosed,
   }: Props = $props();
   const isWindows = typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent);
@@ -198,7 +206,7 @@
       // processed if the ConPTY output buffer isn't fully drained first).
       const nonInteractiveCmd = autoCloseOnExit && initialCommand.trim() ? initialCommand : null;
 
-      const id = await spawnTerminal(shell, cwd, term.cols, term.rows, nonInteractiveCmd);
+      const id = await spawnTerminal(shell, cwd, term.cols, term.rows, nonInteractiveCmd, hookId);
 
       // If we passed the script as a shell argument, mark it sent so the PTY-
       // input $effect below doesn't double-submit it.
