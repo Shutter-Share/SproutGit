@@ -37,6 +37,7 @@
       : '';
   let workspacePath = $state(initialWorkspacePath);
 
+  // GitHub auth state — fetched fresh from backend on each mount
   let githubAuth = $state<GitHubAuthStatus | null>(null);
   let deviceCode = $state<DeviceCodeResponse | null>(null);
   let authPolling = $state(false);
@@ -269,6 +270,7 @@
     try {
       const dc = await githubDeviceFlowStart();
       deviceCode = dc;
+      void navigator.clipboard.writeText(dc.userCode);
       await openUrl(dc.verificationUri);
       setTimeout(async function poll() {
         try {
@@ -276,7 +278,7 @@
           if (result.status === 'complete') {
             authPolling = false;
             deviceCode = null;
-            githubAuth = { authenticated: true, username: result.username, provider: 'github' };
+            githubAuth = { authenticated: true, username: result.username ?? null, provider: 'github' };
             await loadGithubEmailSuggestions();
             toast.success(`Signed in as ${result.username ?? 'GitHub user'}`);
             return;
@@ -504,9 +506,33 @@
               onclick={handleGithubLogout}>Sign out</button
             >
           </div>
-        {:else if authPolling}
-          <div class="flex items-center gap-2 text-xs text-(--sg-text-dim)">
-            <Spinner size="sm" /> Waiting for authorization...
+        {:else if deviceCode}
+          <div class="space-y-2.5">
+            <p class="text-xs text-(--sg-text-dim)">
+              Enter this code on
+              <button
+                class="text-(--sg-primary) hover:underline"
+                onclick={() => void openUrl(deviceCode!.verificationUri)}
+                >github.com/login/device</button
+              >
+            </p>
+            <div class="flex items-center gap-2">
+              <span
+                class="flex-1 rounded border border-(--sg-border) bg-(--sg-surface-raised) px-3 py-2 text-center font-mono text-base font-bold tracking-[0.2em] text-(--sg-text)"
+                >{deviceCode.userCode}</span
+              >
+              <button
+                class="rounded border border-(--sg-border) px-3 py-1.5 text-xs text-(--sg-text-dim) hover:bg-(--sg-surface-raised) hover:text-(--sg-text)"
+                onclick={() => {
+                  void navigator.clipboard.writeText(deviceCode!.userCode);
+                  toast.success('Code copied');
+                }}>Copy</button
+              >
+            </div>
+            <div class="flex items-center gap-2 text-xs text-(--sg-text-dim)">
+              <Spinner size="sm" />
+              {authPolling ? 'Waiting for authorization…' : 'Opening GitHub…'}
+            </div>
           </div>
         {:else}
           <button

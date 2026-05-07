@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const GITHUB_CLIENT_ID: &str = "Ov23lifguAkeqGXQaZFS";
+const GITHUB_CLIENT_ID: &str = "Ov23li7ulFUcqulDi8u8";
 const GITHUB_KEYCHAIN_SERVICE: &str = "dev.sproutgit.github";
 const GITHUB_KEYCHAIN_ACCOUNT: &str = "oauth-token";
 
@@ -173,12 +173,15 @@ pub fn get_stored_token() -> Option<String> {
 fn store_token(token: &str) -> Result<(), String> {
     validate_github_token_for_transport(token)?;
 
-    if write_token_to_keychain(token).is_ok() {
-        let _ = clear_token_from_file();
-        return Ok(());
-    }
+    // Always write to file first — this is the reliable fallback.
+    // Keychain reads can silently fail in sandboxed environments (e.g. Tauri on
+    // macOS without keychain entitlements), so we never clear the file copy.
+    write_token_to_file(token)?;
 
-    write_token_to_file(token)
+    // Also try keychain as a best-effort upgrade; failure is non-fatal.
+    let _ = write_token_to_keychain(token);
+
+    Ok(())
 }
 
 fn delete_token() -> Result<(), String> {
@@ -301,8 +304,10 @@ pub struct GitHubEmailSuggestion {
 }
 
 fn migrate_legacy_token_to_keychain() -> GitHubAuthStorageMigration {
-    let legacy_file_token = read_auth_data().token;
-    let had_legacy_file_token = legacy_file_token.is_some();
+    // File is now always the primary token store (keychain is best-effort).
+    // This migration is kept for backwards compatibility but does not clear
+    // the file copy even when a keychain entry is successfully written.
+    let had_legacy_file_token = read_auth_data().token.is_some();
 
     if read_token_from_keychain().is_some() {
         return GitHubAuthStorageMigration {
@@ -313,11 +318,11 @@ fn migrate_legacy_token_to_keychain() -> GitHubAuthStorageMigration {
         };
     }
 
-    let Some(token) = legacy_file_token else {
+    let Some(token) = read_auth_data().token else {
         return GitHubAuthStorageMigration {
             migrated: false,
-            storage_backend: "none".to_string(),
-            had_legacy_file_token: false,
+            storage_backend: if had_legacy_file_token { "file" } else { "none" }.to_string(),
+            had_legacy_file_token,
             error: None,
         };
     };
@@ -331,15 +336,13 @@ fn migrate_legacy_token_to_keychain() -> GitHubAuthStorageMigration {
         };
     }
 
+    // Try to also write to keychain; leave file intact regardless of outcome.
     match write_token_to_keychain(&token) {
-        Ok(()) => {
-            let clear_error = clear_token_from_file().err();
-            GitHubAuthStorageMigration {
-                migrated: clear_error.is_none(),
-                storage_backend: "keychain".to_string(),
-                had_legacy_file_token: true,
-                error: clear_error,
-            }
+        Ok(()) => GitHubAuthStorageMigration {
+            migrated: true,
+            storage_backend: "keychain".to_string(),
+            had_legacy_file_token: true,
+            error: None,
         },
         Err(err) => GitHubAuthStorageMigration {
             migrated: false,
