@@ -41,6 +41,7 @@
     createCommit,
     startWatchingWorktrees,
     stopWatchingWorktrees,
+    closeAllTerminals,
     onWorktreeChanged,
     getAppSetting,
     listAvailableShells,
@@ -1144,6 +1145,11 @@
 
   onDestroy(() => {
     unlistenWorktreeChanged?.();
+    // Kill all PTY sessions before unmounting. On Windows, live shell processes
+    // (PowerShell / pwsh) hold directory handles on their CWD. Killing them
+    // here ensures those handles are released before any E2E resetTestDirs()
+    // call attempts to delete the worktree directories.
+    void closeAllTerminals();
     void stopWatchingWorktrees();
   });
 

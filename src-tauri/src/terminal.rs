@@ -385,3 +385,27 @@ pub async fn close_terminal(
 
     Ok(())
 }
+
+/// Kill every active PTY session and clear the session map.
+///
+/// Called from the workspace page's `onDestroy` before navigating to the home
+/// screen.  On Windows, each live shell process (PowerShell / pwsh) holds a
+/// directory handle on its CWD.  Killing them here — before the E2E test
+/// helper calls `resetTestDirs()` — ensures those handles are released before
+/// the filesystem cleanup attempts `rmdir` on the worktree directories.
+#[tauri::command]
+pub async fn close_all_terminals(state: tauri::State<'_, TerminalManager>) -> Result<(), String> {
+    let mut sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "Failed to lock terminal sessions".to_string())?;
+
+    for session in sessions.values() {
+        if let Ok(mut child) = session.child.lock() {
+            let _ = child.kill();
+        }
+    }
+    sessions.clear();
+
+    Ok(())
+}

@@ -174,6 +174,7 @@ pub fn run() {
             terminal::terminal_input,
             terminal::terminal_resize,
             terminal::close_terminal,
+            terminal::close_all_terminals,
             watcher::start_watching_worktrees,
             watcher::stop_watching_worktrees,
             #[cfg(feature = "e2e-testing")]

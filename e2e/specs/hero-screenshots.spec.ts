@@ -62,9 +62,9 @@ test.describe('Hero screenshots @screenshots', () => {
   );
 
   test.beforeEach(async ({ tauriPage }) => {
+    resetConfigDb();
     await reloadToHome(tauriPage);
     resetTestDirs();
-    resetConfigDb();
   });
 
   test('captures canonical UI screenshots from the pinned hero repo', async ({

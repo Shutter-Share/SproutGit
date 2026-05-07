@@ -603,6 +603,8 @@ export const terminalResize = (ptyId: string, cols: number, rows: number) =>
 
 export const closeTerminal = (ptyId: string) => invoke<void>('close_terminal', { ptyId });
 
+export const closeAllTerminals = () => invoke<void>('close_all_terminals');
+
 export const onTerminalOutput = (
   ptyId: string,
   callback: (data: string) => void
