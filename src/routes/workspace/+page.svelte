@@ -27,6 +27,7 @@
     openInEditor,
     onHookProgress,
     onHookTerminalLaunch,
+    onGitOpProgress,
     resetWorktreeBranch,
     runWorkspaceHook,
     getWorktreeStatus,
@@ -751,6 +752,8 @@
   let statusLoading = $state(false);
   let stagingAction = $state<string | null>(null);
   let committing = $state(false);
+  let gitOpLog = $state<string[]>([]);
+  let gitOpLogEl = $state<HTMLDivElement | null>(null);
   const pendingWatcherRefreshPaths = new Set<string>();
 
   // ── Active tab ──────────────────────────────────────────────────────────────
@@ -983,6 +986,13 @@
       return;
     }
     committing = true;
+    gitOpLog = [];
+    const unlisten = await onGitOpProgress(line => {
+      gitOpLog = [...gitOpLog, line];
+      requestAnimationFrame(() => {
+        if (gitOpLogEl) gitOpLogEl.scrollTop = gitOpLogEl.scrollHeight;
+      });
+    });
     try {
       const result = await createCommit(selectedWorktree.path, commitMessage);
       toast.success(`Committed: ${result.subject}`);
@@ -993,7 +1003,9 @@
     } catch (err) {
       toast.error(String(err));
     } finally {
+      unlisten();
       committing = false;
+      gitOpLog = [];
       await flushQueuedWatcherRefreshes();
     }
   }
@@ -1566,6 +1578,13 @@
 
     const worktreePath = selectedWorktree.path;
     syncingAction = action;
+    gitOpLog = [];
+    const unlisten = await onGitOpProgress(line => {
+      gitOpLog = [...gitOpLog, line];
+      requestAnimationFrame(() => {
+        if (gitOpLogEl) gitOpLogEl.scrollTop = gitOpLogEl.scrollHeight;
+      });
+    });
     try {
       if (action === 'fetch') {
         await fetchWorktree(worktreePath);
@@ -1587,7 +1606,9 @@
     } catch (err) {
       toast.error(String(err));
     } finally {
+      unlisten();
       syncingAction = null;
+      gitOpLog = [];
     }
   }
 
@@ -1596,6 +1617,13 @@
     if (!worktreePath || !publishRemote) return;
 
     syncingAction = 'push';
+    gitOpLog = [];
+    const unlisten = await onGitOpProgress(line => {
+      gitOpLog = [...gitOpLog, line];
+      requestAnimationFrame(() => {
+        if (gitOpLogEl) gitOpLogEl.scrollTop = gitOpLogEl.scrollHeight;
+      });
+    });
     try {
       const result = await pushWorktreeBranch(worktreePath, publishRemote);
       toast.success(`Published ${result.branch}${result.upstream ? ` to ${result.upstream}` : ''}`);
@@ -1605,7 +1633,9 @@
     } catch (err) {
       toast.error(String(err));
     } finally {
+      unlisten();
       syncingAction = null;
+      gitOpLog = [];
     }
   }
 
@@ -2219,6 +2249,17 @@
             </button>
           </div>
 
+          {#if syncingAction && gitOpLog.length > 0}
+            <div
+              bind:this={gitOpLogEl}
+              class="max-h-16 overflow-auto border-b border-[var(--sg-border-subtle)] bg-[var(--sg-surface)] px-3 py-1.5"
+            >
+              {#each gitOpLog as line}
+                <p class="break-all font-mono text-[10px] text-[var(--sg-text-faint)]">{line}</p>
+              {/each}
+            </div>
+          {/if}
+
           <!-- Active worktree summary (compact, in sidebar) -->
           {#if selectedWorktree && !activeIsRoot}
             {@const dirty = worktreeChangeCounts[selectedWorktree.path] ?? 0}
@@ -2770,6 +2811,16 @@
                       Commit{stagedFiles.length > 0 ? ` (${stagedFiles.length})` : ''}
                     {/if}
                   </button>
+                  {#if committing && gitOpLog.length > 0}
+                    <div
+                      bind:this={gitOpLogEl}
+                      class="mt-1.5 max-h-20 overflow-auto rounded border border-[var(--sg-border-subtle)] bg-[var(--sg-input-bg)] px-2 py-1"
+                    >
+                      {#each gitOpLog as line}
+                        <p class="break-all font-mono text-[10px] text-[var(--sg-text-dim)]">{line}</p>
+                      {/each}
+                    </div>
+                  {/if}
                   <p class="mt-1 text-center text-[9px] text-[var(--sg-text-faint)]">
                     Ctrl+Enter to commit · Enter for new line
                   </p>

@@ -276,6 +276,99 @@ pub fn run_git(action: GitAction, args: &[&str]) -> Result<Output, String> {
         .map_err(|e| format!("Failed to run git action '{}': {e}", action.label()))
 }
 
+/// Run a git command and stream each line of stdout and stderr through `on_line`.
+///
+/// Both streams are drained concurrently by OS threads so that neither buffer
+/// can fill and deadlock the child process.  The captured bytes are still
+/// returned in the `Output` struct so callers can inspect them after the fact.
+pub fn run_git_with_progress_callback<F>(
+    action: GitAction,
+    args: &[&str],
+    on_line: F,
+) -> Result<Output, String>
+where
+    F: Fn(&str) + Send + Sync + 'static,
+{
+    use std::io::Read;
+    use std::process::Stdio;
+    use std::sync::Arc;
+
+    let cb = Arc::new(on_line);
+
+    let mut cmd = git_command(action, args);
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn git action '{}': {e}", action.label()))?;
+
+    let stdout_stream = child.stdout.take();
+    let stderr_stream = child.stderr.take();
+
+    let cb_stdout = Arc::clone(&cb);
+    let cb_stderr = Arc::clone(&cb);
+
+    fn drain_stream<R: Read>(mut stream: R, cb: Arc<impl Fn(&str) + Send + Sync>) -> Vec<u8> {
+        let mut all_bytes: Vec<u8> = Vec::new();
+        let mut line_buf = String::new();
+        let mut buf = [0u8; 4096];
+        loop {
+            match stream.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    all_bytes.extend_from_slice(&buf[..n]);
+                    for &b in &buf[..n] {
+                        if b == b'\n' || b == b'\r' {
+                            let trimmed = line_buf.trim().to_string();
+                            if !trimmed.is_empty() {
+                                cb(&trimmed);
+                            }
+                            line_buf.clear();
+                        } else {
+                            line_buf.push(b as char);
+                        }
+                    }
+                },
+            }
+        }
+        let trimmed = line_buf.trim().to_string();
+        if !trimmed.is_empty() {
+            cb(&trimmed);
+        }
+        all_bytes
+    }
+
+    let stdout_thread = std::thread::spawn(move || {
+        if let Some(stream) = stdout_stream {
+            drain_stream(stream, cb_stdout)
+        } else {
+            Vec::new()
+        }
+    });
+
+    let stderr_thread = std::thread::spawn(move || {
+        if let Some(stream) = stderr_stream {
+            drain_stream(stream, cb_stderr)
+        } else {
+            Vec::new()
+        }
+    });
+
+    let status = child
+        .wait()
+        .map_err(|e| format!("Failed to wait for git action '{}': {e}", action.label()))?;
+
+    let stdout_bytes = stdout_thread.join().unwrap_or_default();
+    let stderr_bytes = stderr_thread.join().unwrap_or_default();
+
+    Ok(Output {
+        status,
+        stdout: stdout_bytes,
+        stderr: stderr_bytes,
+    })
+}
+
 pub fn git_command(action: GitAction, args: &[&str]) -> Command {
     let mut command = base_git_command();
     command.args(args);
