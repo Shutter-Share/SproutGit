@@ -2,6 +2,7 @@ use rusqlite_migration::{Migrations, M};
 use sea_orm::{ConnectionTrait, Database, DatabaseConnection, Statement};
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
+use std::time::Duration;
 
 use crate::git::helpers::{ensure_directory, normalize_existing_path};
 
@@ -83,16 +84,40 @@ fn run_config_migrations(db_path: &Path) -> Result<(), String> {
 /// Apply connection-level PRAGMAs that must be set on every connection open,
 /// not just at schema creation time.
 fn apply_connection_pragmas(conn: &rusqlite::Connection) -> Result<(), String> {
-    conn.execute_batch(
-        "
-        PRAGMA journal_mode = WAL;
-        PRAGMA synchronous   = NORMAL;
-        PRAGMA foreign_keys  = ON;
-        PRAGMA cache_size    = -4096;
-        PRAGMA temp_store    = MEMORY;
-        ",
-    )
-    .map_err(|e| format!("Failed to apply connection PRAGMAs: {e}"))
+    // On slower CI runners, concurrent commands can briefly contend on sqlite
+    // connection setup. Retry busy/locked failures for a short bounded window.
+    const MAX_ATTEMPTS: u32 = 20;
+    const RETRY_DELAY_MS: u64 = 50;
+
+    for attempt in 1..=MAX_ATTEMPTS {
+        match conn.execute_batch(
+            "
+            PRAGMA journal_mode = WAL;
+            PRAGMA synchronous   = NORMAL;
+            PRAGMA foreign_keys  = ON;
+            PRAGMA cache_size    = -4096;
+            PRAGMA temp_store    = MEMORY;
+            ",
+        ) {
+            Ok(()) => return Ok(()),
+            Err(err) => {
+                let retryable = matches!(
+                    err,
+                    rusqlite::Error::SqliteFailure(code, _)
+                        if code.code == rusqlite::ErrorCode::DatabaseBusy
+                            || code.code == rusqlite::ErrorCode::DatabaseLocked
+                );
+
+                if !retryable || attempt == MAX_ATTEMPTS {
+                    return Err(format!("Failed to apply connection PRAGMAs: {err}"));
+                }
+
+                std::thread::sleep(Duration::from_millis(RETRY_DELAY_MS));
+            }
+        }
+    }
+
+    Err("Failed to apply connection PRAGMAs: exhausted retries".to_string())
 }
 
 fn config_db_path() -> Result<PathBuf, String> {
