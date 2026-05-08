@@ -211,6 +211,7 @@ export type HookTerminalLaunchEvent = {
   shell: WorkspaceHookShell;
   cwd: string;
   command: string;
+  keepOpenOnCompletion: boolean;
 };
 
 export type DeviceCodeResponse = {
@@ -586,8 +587,33 @@ export const onWorktreeChanged = (callback: (worktreePath: string) => void): Pro
 
 export const listAvailableShells = () => invoke<string[]>('list_available_shells');
 
-export const spawnTerminal = (shell: string, cwd: string, cols: number, rows: number) =>
-  invoke<string>('spawn_terminal', { shell, cwd, cols, rows });
+export const spawnTerminal = (
+  shell: string,
+  cwd: string,
+  cols: number,
+  rows: number,
+  command?: string | null,
+  hookId?: string | null
+) =>
+  invoke<string>('spawn_terminal', {
+    shell,
+    cwd,
+    cols,
+    rows,
+    command: command ?? null,
+    hookId: hookId ?? null,
+  });
+
+/**
+ * Returns the epoch-ms timestamp at which the auto-close terminal session for
+ * the given hook exited, or `null` if no such session has completed yet.
+ *
+ * Provides a deterministic backend-state synchronisation point so callers do
+ * not need to observe the (PTY exit → IPC event → reactive update → DOM
+ * removal) chain that drives terminal-tab disappearance.
+ */
+export const isHookTerminalClosed = (hookId: string) =>
+  invoke<number | null>('is_hook_terminal_closed', { hookId });
 
 export const terminalInput = (ptyId: string, data: string) =>
   invoke<void>('terminal_input', { ptyId, data });
@@ -596,6 +622,8 @@ export const terminalResize = (ptyId: string, cols: number, rows: number) =>
   invoke<void>('terminal_resize', { ptyId, cols, rows });
 
 export const closeTerminal = (ptyId: string) => invoke<void>('close_terminal', { ptyId });
+
+export const closeAllTerminals = () => invoke<void>('close_all_terminals');
 
 export const onTerminalOutput = (
   ptyId: string,

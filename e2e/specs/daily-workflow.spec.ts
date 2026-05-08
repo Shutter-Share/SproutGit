@@ -189,22 +189,21 @@ function dailyAfterCreateTerminalHook(marker: string) {
 
   return {
     shell: process.platform === 'darwin' ? 'zsh' : 'bash',
-    script: [
-      `echo "${marker}:$SPROUTGIT_WORKTREE_BRANCH"`,
-      'sleep 0.3',
-    ].join('\n'),
+    script: [`echo "${marker}:$SPROUTGIT_WORKTREE_BRANCH"`, 'sleep 0.3'].join('\n'),
   };
 }
 
 test.describe('Daily developer workflow', () => {
   test.beforeEach(async ({ tauriPage }) => {
+    // Delete the config DB first (no EBUSY risk — it lives in a separate run-scoped
+    // directory, not the workspace dir the watcher holds open).
+    resetConfigDb();
     // Navigate the app to the home screen BEFORE deleting test directories.
     // On Windows, the Tauri file watcher holds open handles on the worktrees
     // directory from the previous test. Navigating away first causes the
     // backend to stop watching, releasing those handles before rmSync runs.
     await reloadToHome(tauriPage);
     resetTestDirs();
-    resetConfigDb();
   });
 
   // ---------------------------------------------------------------------------
@@ -707,7 +706,9 @@ test.describe('Daily developer workflow', () => {
 
     const terminalPanels = tauriPage.locator('[data-sg-terminal] [data-pty-id]');
     const panelCount = await terminalPanels.count();
-    expect(panelCount).toBeGreaterThanOrEqual(3);
+    // Two hook sessions are launched; the auto-spawn blank session is suppressed when
+    // hook launches are pending, so the minimum is 2 (one per hook).
+    expect(panelCount).toBeGreaterThanOrEqual(2);
 
     const hookRows = querySqlite(
       stateDbPath,
@@ -717,5 +718,112 @@ test.describe('Daily developer workflow', () => {
     expect(hookRows.map(row => row[0])).toEqual([firstHookId, secondHookId]);
     expect(hookRows.map(row => row[1])).toEqual(['success', 'success']);
     expect(hookRows.map(row => row[2])).toEqual(['after_worktree_create', 'after_worktree_create']);
+  });
+
+  test('auto-closes terminal session when keepOpenOnCompletion is false', async ({ tauriPage }) => {
+    const repoPath = createTestRepo('daily-autoclose-hooks', { extraCommits: 1 });
+
+    await importRepoViaUi(tauriPage, repoPath);
+
+    const workspaceParent = dirname(dirname(repoPath));
+    const workspacePath = join(workspaceParent, `${basename(repoPath)}-workspace`);
+    const stateDbPath = join(workspacePath, '.sproutgit', 'state.db');
+
+    const autoCloseHookId = 'hook-daily-autoclose-0';
+    const keepOpenHookId = 'hook-daily-keepopen-1';
+    const autoCloseHookName = 'Daily auto-close hook';
+    const keepOpenHookName = 'Daily keep-open hook';
+
+    const hookOne = dailyAfterCreateTerminalHook('AUTO_CLOSE');
+    const hookTwo = dailyAfterCreateTerminalHook('KEEP_OPEN');
+
+    // Hook with keepOpenOnCompletion: 0 — terminal session should disappear after exit
+    insertHookDefinition(stateDbPath, {
+      id: autoCloseHookId,
+      name: autoCloseHookName,
+      trigger: 'after_worktree_create',
+      shell: hookOne.shell,
+      script: hookOne.script,
+      scope: 'workspace',
+      executionTarget: 'trigger_worktree',
+      executionMode: 'terminal_tab',
+      keepOpenOnCompletion: 0,
+      timeoutSeconds: 90,
+    });
+
+    // Hook with keepOpenOnCompletion: 1 — terminal session should remain visible after exit
+    insertHookDefinition(stateDbPath, {
+      id: keepOpenHookId,
+      name: keepOpenHookName,
+      trigger: 'after_worktree_create',
+      shell: hookTwo.shell,
+      script: hookTwo.script,
+      scope: 'workspace',
+      executionTarget: 'trigger_worktree',
+      executionMode: 'terminal_tab',
+      keepOpenOnCompletion: 1,
+      timeoutSeconds: 90,
+    });
+
+    // Serialize execution: keepOpen runs after autoClose, matching the multi-hooks
+    // pattern to avoid the hookTerminalLaunchRequest reactive-update race.
+    insertHookDependency(stateDbPath, keepOpenHookId, autoCloseHookId);
+
+    const targetBranch = 'feature/autoclose-hooks';
+    await createWorktreeViaUi(tauriPage, targetBranch);
+
+    const autoCloseSessionTab = tauriPage.locator(
+      `[data-testid="terminal-session-tab"][data-session-label^="${autoCloseHookName} ("]`
+    );
+    const keepOpenSessionTab = tauriPage.locator(
+      `[data-testid="terminal-session-tab"][data-session-label^="${keepOpenHookName} ("]`
+    );
+
+    // ── Why this test races and how we synchronise on it ──────────────────────
+    //
+    // In `terminal_tab` execution mode, the hook runner emits the
+    // `hook-terminal-launch` event and returns success IMMEDIATELY — it does
+    // NOT wait for the spawned process to exit.  `insertHookDependency` only
+    // sequences hook *dispatch order*, not *process completion*.
+    //
+    // So the actual sequence is:
+    //   1. autoClose hook dispatches → emits launch event → returns success
+    //   2. autoClose process starts running (echo + sleep 0.3 ≈ 300 ms)
+    //   3. keepOpen hook dispatches (dependency satisfied by step 1) → emits
+    //      launch event → keepOpen tab appears in the UI
+    //   4. autoClose process exits → terminal-closed event → frontend removes
+    //      tab.  The chain (PTY exit → wait-thread → IPC → frontend listener →
+    //      reactive update → DOM removal) is fast in practice but can exceed a
+    //      multi-second budget on loaded CI runners.
+    //
+    // Steps 2 and 3 run in parallel, so "keepOpen tab visible" is NOT proof
+    // that "autoClose tab is gone".  And we can't rely on `waitFor(autoCloseTab
+    // .toAppear)` either — on fast Linux CI the tab can be created and
+    // destroyed inside the polling loop of `createWorktreeViaUi()` above.
+    //
+    // The deterministic approach: synchronise on real backend state via
+    // `is_hook_terminal_closed`, which the spawn_terminal wait-thread updates
+    // the moment the child process exits — completely upstream of the IPC →
+    // reactive-update → DOM-removal chain that drives tab disappearance.
+    // Once that returns a non-null timestamp, we know the close pipeline is
+    // strictly downstream and assert the DOM state.
+
+    await keepOpenSessionTab.waitFor(DEFAULT_UI_TIMEOUT);
+
+    const closeDeadline = Date.now() + DEFAULT_UI_TIMEOUT;
+    let backendClosedAt: number | null = null;
+    while (Date.now() < closeDeadline) {
+      backendClosedAt = (await tauriPage.evaluate(
+        `window.__TAURI_INTERNALS__.invoke('is_hook_terminal_closed', { hookId: ${JSON.stringify(autoCloseHookId)} })`
+      )) as number | null;
+      if (backendClosedAt !== null) break;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    expect(backendClosedAt, 'backend should have recorded autoClose process exit').not.toBeNull();
+
+    await expect(autoCloseSessionTab).not.toBeVisible();
+
+    // keepOpen tab remains visible (keep_open_on_completion=true).
+    await expect(keepOpenSessionTab).toBeVisible();
   });
 });

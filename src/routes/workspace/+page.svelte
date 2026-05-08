@@ -41,6 +41,7 @@
     createCommit,
     startWatchingWorktrees,
     stopWatchingWorktrees,
+    closeAllTerminals,
     onWorktreeChanged,
     getAppSetting,
     listAvailableShells,
@@ -75,6 +76,9 @@
     ArrowDownToLine,
     ArrowUpFromLine,
     GitBranch,
+    Copy,
+    Repeat,
+    Pencil,
     X,
   } from 'lucide-svelte';
   import WindowControls from '$lib/components/WindowControls.svelte';
@@ -155,6 +159,7 @@
     cwd: string;
     label: string;
     running: boolean;
+    keepOpenOnCompletion: boolean;
   };
 
   let hookTerminalRuns = $state<HookTerminalRun[]>([]);
@@ -230,7 +235,10 @@
     operationLogs = [...operationLogs, line];
   }
 
-  function updateHookTerminalRun(hookId: string, updater: (current: HookTerminalRun) => HookTerminalRun) {
+  function updateHookTerminalRun(
+    hookId: string,
+    updater: (current: HookTerminalRun) => HookTerminalRun
+  ) {
     const idx = hookTerminalRuns.findIndex(run => run.hookId === hookId);
     if (idx < 0) return;
     const current = hookTerminalRuns[idx];
@@ -780,8 +788,10 @@
     shell: string;
     label: string;
     command: string;
+    keepOpenOnCompletion: boolean;
+    hookId: string;
   };
-  let hookTerminalLaunchRequest = $state<HookTerminalLaunchRequest | null>(null);
+  let hookTerminalLaunchRequests = $state<HookTerminalLaunchRequest[]>([]);
   // Paths whose terminal panel has been initialized at least once.
   // Once added, the TerminalPanel stays mounted (display:none when inactive)
   // so the PTY session survives tab switches and worktree switches.
@@ -1136,6 +1146,11 @@
 
   onDestroy(() => {
     unlistenWorktreeChanged?.();
+    // Kill all PTY sessions before unmounting. On Windows, live shell processes
+    // (PowerShell / pwsh) hold directory handles on their CWD. Killing them
+    // here ensures those handles are released before any E2E resetTestDirs()
+    // call attempts to delete the worktree directories.
+    void closeAllTerminals();
     void stopWatchingWorktrees();
   });
 
@@ -1337,8 +1352,9 @@
     const matchedWorktree = findPath(worktrees, wt => wt.path, cwd);
     const locationLabel = pathsEqual(cwd, workspace?.workspacePath)
       ? 'workspace'
-      : matchedWorktree?.branch ?? cwd.split('/').pop() ?? 'worktree';
+      : (matchedWorktree?.branch ?? cwd.split('/').pop() ?? 'worktree');
     const sessionLabel = `${event.hookName} (${locationLabel})`;
+    const keepOpenOnCompletion = event.keepOpenOnCompletion;
 
     if (matchedWorktree) {
       activeWorktreePath = matchedWorktree.path;
@@ -1358,6 +1374,7 @@
               cwd,
               label: sessionLabel,
               running: true,
+              keepOpenOnCompletion,
             }
           : run
       );
@@ -1371,6 +1388,7 @@
           cwd,
           label: sessionLabel,
           running: true,
+          keepOpenOnCompletion,
         },
       ];
     }
@@ -1380,17 +1398,21 @@
       terminalInitializedPaths = new Set([...terminalInitializedPaths, cwd]);
     }
 
-    // Set the launch request for the TerminalContainer to pick up the command
-    hookTerminalLaunchRequest = {
-      id: `${event.hookId}-${Date.now()}`,
-      cwd,
-      shell: event.shell,
-      label: sessionLabel,
-      command: event.command,
-    };
-    appendOperationLog(
-      `Opened ${event.hookName} in ${locationLabel} terminal.`
-    );
+    // Append to the queue so back-to-back hook launches are not lost when
+    // Svelte batches reactive updates and only runs effects once.
+    hookTerminalLaunchRequests = [
+      ...hookTerminalLaunchRequests,
+      {
+        id: `${event.hookId}-${Date.now()}`,
+        cwd,
+        shell: event.shell,
+        label: sessionLabel,
+        command: event.command,
+        keepOpenOnCompletion,
+        hookId: event.hookId,
+      },
+    ];
+    appendOperationLog(`Opened ${event.hookName} in ${locationLabel} terminal.`);
   }
 
   function handleCreateWorktreeFromGraph(fromRef: string) {
@@ -1448,7 +1470,7 @@
       for (const hook of manualHooks) {
         items.push({
           label: hook.name,
-          icon: '▶',
+          icon: Play,
           action: () => void handleRunHook(wt, hook, availableHooks),
         });
       }
@@ -1460,7 +1482,7 @@
       for (const hook of lifecycleHooks) {
         items.push({
           label: `${hook.name} (${formatHookTrigger(hook.trigger)})`,
-          icon: '▶',
+          icon: Play,
           action: () => void handleRunHook(wt, hook, availableHooks),
         });
       }
@@ -1883,18 +1905,22 @@
     const items: MenuItem[] = [
       {
         label: 'Switch here',
-        icon: '⇄',
+        icon: Repeat,
         action: () => {
           activeWorktreePath = wt.path;
           activeTerminalPath = wt.path;
         },
         disabled: isActive,
       },
-      { label: 'Open folder', icon: '📂', action: () => handleRevealWorktree(wt.path) },
-      { label: 'Open in editor', icon: '⌨', action: () => handleOpenInEditor(wt.path) },
+      { label: 'Open folder', icon: FolderOpen, action: () => handleRevealWorktree(wt.path) },
+      {
+        label: 'Open in editor',
+        icon: SquareTerminal,
+        action: () => handleOpenInEditor(wt.path),
+      },
       {
         label: 'Copy path',
-        icon: '⧉',
+        icon: Copy,
         action: () => {
           void navigator.clipboard.writeText(wt.path);
           toast.success('Copied worktree path');
@@ -1906,7 +1932,7 @@
     if (allowCheckout) {
       items.push({
         label: 'Checkout…',
-        icon: '⎋',
+        icon: GitBranch,
         action: () => {
           activeWorktreePath = wt.path;
           activeTerminalPath = wt.path;
@@ -1918,7 +1944,7 @@
     } else {
       items.push({
         label: 'Checkout unavailable (detached)',
-        icon: '⎋',
+        icon: GitBranch,
         action: () => {},
         disabled: true,
       });
@@ -1927,7 +1953,7 @@
     items.push({ separator: true });
     items.push({
       label: 'Run hooks…',
-      icon: '▶',
+      icon: Play,
       action: () => {
         activeWorktreePath = wt.path;
         activeTerminalPath = wt.path;
@@ -1936,7 +1962,7 @@
     });
     items.push({
       label: 'Rename branch (coming soon)',
-      icon: '✎',
+      icon: Pencil,
       action: () => {},
       disabled: true,
     });
@@ -1944,7 +1970,7 @@
     if (section === 'managed') {
       items.push({
         label: 'Branch actions (managed policy)',
-        icon: '⎇',
+        icon: ShieldAlert,
         action: () => {},
         disabled: true,
       });
@@ -1952,7 +1978,7 @@
     if (section === 'persistent') {
       items.push({
         label: 'Branch actions (persistent policy)',
-        icon: '⎇',
+        icon: ShieldAlert,
         action: () => {},
         disabled: true,
       });
@@ -1960,7 +1986,7 @@
     if (section === 'external') {
       items.push({
         label: 'Branch actions (external policy)',
-        icon: '⎇',
+        icon: ShieldAlert,
         action: () => {},
         disabled: true,
       });
@@ -1970,13 +1996,13 @@
       items.push({ separator: true });
       items.push({
         label: 'Pull (coming soon)',
-        icon: '↓',
+        icon: ArrowDownToLine,
         action: () => {},
         disabled: true,
       });
       items.push({
         label: 'Push (coming soon)',
-        icon: '↑',
+        icon: ArrowUpFromLine,
         action: () => {},
         disabled: true,
       });
@@ -1999,7 +2025,7 @@
       items.push({ separator: true });
       items.push({
         label: 'Create worktree from branch',
-        icon: '+',
+        icon: Plus,
         action: () => handleCreateWorktreeFromGraph(targetRef),
       });
     }
@@ -2025,12 +2051,12 @@
     const items: MenuItem[] = [
       {
         label: 'Create worktree from branch',
-        icon: '+',
+        icon: Plus,
         action: () => handleCreateWorktreeFromGraph(refName),
       },
       {
         label: 'Copy branch name',
-        icon: '⧉',
+        icon: Copy,
         action: () => {
           void navigator.clipboard.writeText(refName);
           toast.success('Copied branch name');
@@ -2219,7 +2245,11 @@
             <button
               type="button"
               onclick={() => void runActiveWorktreeAction('pull')}
-              disabled={!selectedWorktree || activeIsRoot || selectedWorktree.detached || syncingAction !== null || committing}
+              disabled={!selectedWorktree ||
+                activeIsRoot ||
+                selectedWorktree.detached ||
+                syncingAction !== null ||
+                committing}
               class="rounded-md p-1.5 text-[var(--sg-text-dim)] hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text)] disabled:text-[var(--sg-text-faint)] disabled:opacity-50"
               title={selectedWorktree?.detached
                 ? 'Pull unavailable for detached HEAD'
@@ -2236,7 +2266,11 @@
             <button
               type="button"
               onclick={() => void runActiveWorktreeAction('push')}
-              disabled={!selectedWorktree || activeIsRoot || selectedWorktree.detached || syncingAction !== null || committing}
+              disabled={!selectedWorktree ||
+                activeIsRoot ||
+                selectedWorktree.detached ||
+                syncingAction !== null ||
+                committing}
               class="rounded-md p-1.5 text-[var(--sg-text-dim)] hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text)] disabled:text-[var(--sg-text-faint)] disabled:opacity-50"
               title={selectedWorktree?.detached
                 ? 'Push unavailable for detached HEAD'
@@ -2525,7 +2559,9 @@
             class="flex items-center justify-between gap-3 border-b border-[var(--sg-border)] bg-[var(--sg-surface-raised)] px-3 py-2"
           >
             <div class="min-w-0">
-              <p class="truncate text-xs font-semibold text-[var(--sg-text)]">{operationStatus.title}</p>
+              <p class="truncate text-xs font-semibold text-[var(--sg-text)]">
+                {operationStatus.title}
+              </p>
               <p class="truncate text-[10px] text-[var(--sg-text-faint)]">
                 {#if operationCompleted}
                   {operationStatus.detail} Completed.
@@ -2539,11 +2575,26 @@
                 <p class="truncate text-[10px] text-[var(--sg-text-faint)]">{lastOperationLog}</p>
               {/if}
               <div class="mt-1 flex flex-wrap items-center gap-1 text-[10px]">
-                <span class="rounded border border-[var(--sg-border)] bg-[var(--sg-surface)] px-1.5 py-px text-[var(--sg-text-faint)]">Pending: {hookStatusSummary.pending}</span>
-                <span class="rounded border border-[var(--sg-accent)]/40 bg-[var(--sg-accent)]/15 px-1.5 py-px text-[var(--sg-accent)]">Running: {hookStatusSummary.running}</span>
-                <span class="rounded border border-[var(--sg-primary)]/40 bg-[var(--sg-primary)]/15 px-1.5 py-px text-[var(--sg-primary)]">Complete: {hookStatusSummary.success}</span>
-                <span class="rounded border border-[var(--sg-warning)]/40 bg-[var(--sg-warning)]/15 px-1.5 py-px text-[var(--sg-warning)]">Skipped: {hookStatusSummary.skipped}</span>
-                <span class="rounded border border-[var(--sg-danger)]/40 bg-[var(--sg-danger)]/15 px-1.5 py-px text-[var(--sg-danger)]">Errors: {hookStatusSummary.error + hookStatusSummary.timed_out}</span>
+                <span
+                  class="rounded border border-[var(--sg-border)] bg-[var(--sg-surface)] px-1.5 py-px text-[var(--sg-text-faint)]"
+                  >Pending: {hookStatusSummary.pending}</span
+                >
+                <span
+                  class="rounded border border-[var(--sg-accent)]/40 bg-[var(--sg-accent)]/15 px-1.5 py-px text-[var(--sg-accent)]"
+                  >Running: {hookStatusSummary.running}</span
+                >
+                <span
+                  class="rounded border border-[var(--sg-primary)]/40 bg-[var(--sg-primary)]/15 px-1.5 py-px text-[var(--sg-primary)]"
+                  >Complete: {hookStatusSummary.success}</span
+                >
+                <span
+                  class="rounded border border-[var(--sg-warning)]/40 bg-[var(--sg-warning)]/15 px-1.5 py-px text-[var(--sg-warning)]"
+                  >Skipped: {hookStatusSummary.skipped}</span
+                >
+                <span
+                  class="rounded border border-[var(--sg-danger)]/40 bg-[var(--sg-danger)]/15 px-1.5 py-px text-[var(--sg-danger)]"
+                  >Errors: {hookStatusSummary.error + hookStatusSummary.timed_out}</span
+                >
               </div>
             </div>
             <div class="flex shrink-0 items-center gap-2">
@@ -2801,7 +2852,10 @@
                   ></textarea>
                   <button
                     onclick={handleCreateCommit}
-                    disabled={committing || !!syncingAction || !commitMessage.trim() || stagedFiles.length === 0}
+                    disabled={committing ||
+                      !!syncingAction ||
+                      !commitMessage.trim() ||
+                      stagedFiles.length === 0}
                     data-testid="btn-commit"
                     class="mt-1.5 flex w-full items-center justify-center gap-2 rounded bg-[var(--sg-primary)] px-2.5 py-1.5 text-xs font-semibold text-[var(--sg-bg)] hover:bg-[var(--sg-primary-hover)] disabled:cursor-not-allowed disabled:opacity-40"
                     title={stagedFiles.length === 0
@@ -2820,7 +2874,9 @@
                       class="mt-1.5 max-h-20 overflow-auto rounded border border-[var(--sg-border-subtle)] bg-[var(--sg-input-bg)] px-2 py-1"
                     >
                       {#each gitOpLog as line}
-                        <p class="break-all font-mono text-[10px] text-[var(--sg-text-dim)]">{line}</p>
+                        <p class="break-all font-mono text-[10px] text-[var(--sg-text-dim)]">
+                          {line}
+                        </p>
                       {/each}
                     </div>
                   {/if}
@@ -2976,7 +3032,9 @@
             </div>
           {:else if activeTab === 'terminal' && !activeTerminalPath}
             <div class="flex flex-1 items-center justify-center">
-              <p class="text-sm text-[var(--sg-text-faint)]">Select a worktree or workspace terminal target</p>
+              <p class="text-sm text-[var(--sg-text-faint)]">
+                Select a worktree or workspace terminal target
+              </p>
             </div>
           {:else if activeTab !== 'terminal'}
             <div class="flex flex-1 items-center justify-center">
@@ -2999,7 +3057,7 @@
               {defaultShell}
               {availableShells}
               cwd={wtPath}
-              launchRequest={hookTerminalLaunchRequest}
+              launchRequests={hookTerminalLaunchRequests}
               forcedLayout={shouldLockHookTerminals ? 'grid' : null}
               interactionLocked={Boolean(runningHooksByCwd[wtPath])}
               lockReason={activeHookName

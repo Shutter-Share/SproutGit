@@ -16,9 +16,9 @@ import { dirname, join } from 'node:path';
 
 test.describe('Worktree workflow', () => {
   test.beforeEach(async ({ tauriPage }) => {
+    resetConfigDb();
     await reloadToHome(tauriPage);
     resetTestDirs();
-    resetConfigDb();
   });
 
   test('creates, switches, and deletes managed worktrees', async ({ tauriPage }) => {

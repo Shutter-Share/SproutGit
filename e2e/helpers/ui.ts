@@ -130,20 +130,33 @@ async function waitForOptionalToastMessage(
   }
 }
 
-async function performVerifiedReload(tauriPage: AdapterPage) {
-  await waitForMainWindow(tauriPage, STARTUP_UI_TIMEOUT);
-  await tauriPage.evaluate('window.location.reload()');
-  await waitForMainWindow(tauriPage, 15_000);
-}
-
 export async function reloadToHome(tauriPage: AdapterPage) {
+  // reloadToHome has a strict budget: the entire beforeEach (including this
+  // function) must complete within the 90 s per-test timeout.  Every await
+  // below can burn up to STARTUP_UI_TIMEOUT (45 s), so keeping the chain
+  // short is critical.
+  //
+  // Sequence rationale:
+  //  1. waitForMainWindow        — ensure the window is alive before evaluating
+  //  2. clearCachedWorkspaceHint — remove sg_workspace_hint BEFORE navigation;
+  //                               this prevents the home page onMount from
+  //                               auto-navigating back to the previous workspace
+  //  3. ensureHome               — navigate to home via UI (clicks
+  //                               btn-back-projects when needed); on return,
+  //                               btn-import is visible — no extra waitForHomeReady
+  //
+  // A full window.location.reload() is NOT performed.  SvelteKit route
+  // navigation already tears down and remounts all page components, giving the
+  // same isolation as a hard reload.  The reload was the dominant cost on slow
+  // Windows CI runners (WebView cold-start ≈ 20–45 s), routinely pushing
+  // beforeEach past the 90 s test timeout.  The Tauri Playwright adapter
+  // cheatsheet also recommends UI-driven navigation over hard reloads as the
+  // suite default.
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       await waitForMainWindow(tauriPage, STARTUP_UI_TIMEOUT);
-      await ensureHome(tauriPage);
       await clearCachedWorkspaceHint(tauriPage);
-      await performVerifiedReload(tauriPage);
-      await waitForHomeReady(tauriPage, STARTUP_UI_TIMEOUT);
+      await ensureHome(tauriPage);
       return;
     } catch (error) {
       if (attempt === 1) {

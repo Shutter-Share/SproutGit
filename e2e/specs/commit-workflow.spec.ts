@@ -19,9 +19,9 @@ import {
 
 test.describe('Commit workflow', () => {
   test.beforeEach(async ({ tauriPage }) => {
+    resetConfigDb();
     await reloadToHome(tauriPage);
     resetTestDirs();
-    resetConfigDb();
   });
 
   test('stages and commits changes from a managed worktree', async ({ tauriPage }) => {

@@ -278,7 +278,11 @@
           if (result.status === 'complete') {
             authPolling = false;
             deviceCode = null;
-            githubAuth = { authenticated: true, username: result.username ?? null, provider: 'github' };
+            githubAuth = {
+              authenticated: true,
+              username: result.username ?? null,
+              provider: 'github',
+            };
             await loadGithubEmailSuggestions();
             toast.success(`Signed in as ${result.username ?? 'GitHub user'}`);
             return;
@@ -867,9 +871,7 @@
                     class="mb-3 max-h-40 overflow-y-auto rounded border border-(--sg-border) bg-(--sg-bg) p-2"
                   >
                     <pre
-                      class="whitespace-pre-wrap text-xs leading-relaxed text-(--sg-text-dim)"
-                      >{releaseNotes}</pre
-                    >
+                      class="whitespace-pre-wrap text-xs leading-relaxed text-(--sg-text-dim)">{releaseNotes}</pre>
                   </div>
                 {/if}
                 <button

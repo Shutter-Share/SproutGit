@@ -5,9 +5,9 @@ import { DEFAULT_UI_TIMEOUT, ensureHome, importRepoViaUi, reloadToHome } from '.
 
 test.describe('Import workflow', () => {
   test.beforeEach(async ({ tauriPage }) => {
+    resetConfigDb();
     await reloadToHome(tauriPage);
     resetTestDirs();
-    resetConfigDb();
   });
 
   test('imports a local repo and records it in recent projects', async ({ tauriPage }) => {

@@ -325,7 +325,12 @@ fn migrate_legacy_token_to_keychain() -> GitHubAuthStorageMigration {
     let Some(token) = auth_data.token else {
         return GitHubAuthStorageMigration {
             migrated: false,
-            storage_backend: if had_legacy_file_token { "file" } else { "none" }.to_string(),
+            storage_backend: if had_legacy_file_token {
+                "file"
+            } else {
+                "none"
+            }
+            .to_string(),
             had_legacy_file_token,
             error: None,
         };

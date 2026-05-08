@@ -23,9 +23,28 @@
     initialCommand?: string;
     /** When true, terminal input is disabled and the panel is read-only. */
     locked?: boolean;
+    /** When true, close the terminal tab automatically after process exit. */
+    autoCloseOnExit?: boolean;
+    /**
+     * When set, identifies the hook that triggered this terminal session.
+     * Forwarded to the backend `spawn_terminal` call so the wait-thread can
+     * record the exit timestamp under this hook id (used by E2E tests to
+     * synchronise on backend state instead of DOM transitions).
+     */
+    hookId?: string;
+    /** Callback invoked when auto-close is requested after process exit. */
+    onAutoClosed?: () => void;
   };
 
-  const { shell, cwd, initialCommand = '', locked = false }: Props = $props();
+  const {
+    shell,
+    cwd,
+    initialCommand = '',
+    locked = false,
+    autoCloseOnExit = false,
+    hookId,
+    onAutoClosed,
+  }: Props = $props();
   const isWindows = typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent);
 
   // ── DOM & xterm refs ──────────────────────────────────────────────────────
@@ -181,7 +200,19 @@
 
     // Spawn the shell
     try {
-      const id = await spawnTerminal(shell, cwd, term.cols, term.rows);
+      // When autoCloseOnExit is enabled, spawn non-interactively so the process
+      // exits naturally when the script completes.  This avoids the PTY-input
+      // timing race on Windows ConPTY (where `exit` sent via PTY may never be
+      // processed if the ConPTY output buffer isn't fully drained first).
+      const nonInteractiveCmd = autoCloseOnExit && initialCommand.trim() ? initialCommand : null;
+
+      const id = await spawnTerminal(shell, cwd, term.cols, term.rows, nonInteractiveCmd, hookId);
+
+      // If we passed the script as a shell argument, mark it sent so the PTY-
+      // input $effect below doesn't double-submit it.
+      if (nonInteractiveCmd) {
+        sentInitialCommand = true;
+      }
       ptyId = id;
 
       unlistenOutput = await onTerminalOutput(id, data => {
@@ -191,6 +222,9 @@
       unlistenClosed = await onTerminalClosed(id, () => {
         closed = true;
         term?.write('\r\n\x1b[2m[process exited]\x1b[0m\r\n');
+        if (autoCloseOnExit) {
+          onAutoClosed?.();
+        }
       });
     } catch (err) {
       error = String(err);
