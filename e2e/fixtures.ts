@@ -7,6 +7,7 @@ import {
 } from '@srsholmes/tauri-playwright';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { resetConfigDb, resetTestDirs } from './helpers/fixtures';
 
 const MCP_SOCKET =
   process.env.SPROUTGIT_PLAYWRIGHT_SOCKET_PATH ?? join(tmpdir(), 'sproutgit-playwright.sock');
@@ -42,15 +43,28 @@ function parseCommandSpec(spec: string): { command: string; args: string[] } {
 
 type Fixtures = {
   mode: 'tauri';
+  _resetE2EState: void;
   tauriPage: TauriPage;
 };
 
 export const test = base.extend<Fixtures>({
   mode: ['tauri', { option: true }],
-  tauriPage: async ({ mode }, use) => {
+  _resetE2EState: [
+    async ({}, use) => {
+      // Reset disk state before the app launches so startup code never races
+      // the config DB deletion or workspace directory cleanup.
+      resetConfigDb();
+      resetTestDirs();
+      await use();
+    },
+    { auto: true },
+  ],
+  tauriPage: async ({ mode, _resetE2EState }, use) => {
     if (mode !== 'tauri') {
       throw new Error(`Unsupported E2E mode: ${mode}`);
     }
+
+    void _resetE2EState;
 
     let processManager: TauriProcessManager | null = null;
     let client: PluginClient | null = null;

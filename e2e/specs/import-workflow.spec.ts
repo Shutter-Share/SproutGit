@@ -1,15 +1,9 @@
 import { basename, dirname, join } from 'node:path';
 import { test, expect } from '../fixtures';
-import { createTestRepo, querySqlite, resetConfigDb, resetTestDirs } from '../helpers/fixtures';
-import { DEFAULT_UI_TIMEOUT, ensureHome, importRepoViaUi, reloadToHome } from '../helpers/ui';
+import { createTestRepo, querySqlite } from '../helpers/fixtures';
+import { DEFAULT_UI_TIMEOUT, ensureHome, importRepoViaUi } from '../helpers/ui';
 
 test.describe('Import workflow', () => {
-  test.beforeEach(async ({ tauriPage }) => {
-    resetConfigDb();
-    await reloadToHome(tauriPage);
-    resetTestDirs();
-  });
-
   test('imports a local repo and records it in recent projects', async ({ tauriPage }) => {
     const repoPath = createTestRepo('import-test', { extraCommits: 3 });
     await importRepoViaUi(tauriPage, repoPath);

@@ -36,10 +36,6 @@ function isMissingMainWindowError(error: unknown): boolean {
   return error instanceof Error && error.message.includes("window 'main' not found");
 }
 
-function isWaitForFunctionTimeout(error: unknown): boolean {
-  return error instanceof Error && error.message.includes('waitForFunction timeout');
-}
-
 async function safeIsVisible(tauriPage: AdapterPage, selector: string) {
   try {
     return await tauriPage.isVisible(selector);
@@ -49,85 +45,6 @@ async function safeIsVisible(tauriPage: AdapterPage, selector: string) {
     }
     throw error;
   }
-}
-
-async function waitForMainWindow(tauriPage: AdapterPage, timeout: number) {
-  const deadline = Date.now() + timeout;
-
-  while (Date.now() < deadline) {
-    try {
-      await tauriPage.waitForFunction('document.readyState === "complete"', 1_000);
-      return;
-    } catch (error) {
-      if (!isMissingMainWindowError(error) && !isWaitForFunctionTimeout(error)) {
-        throw error;
-      }
-      await delay(200);
-    }
-  }
-
-  throw new Error('Main window did not become available for E2E interaction');
-}
-
-async function waitForHomeReady(tauriPage: AdapterPage, timeout: number) {
-  const deadline = Date.now() + timeout;
-
-  while (Date.now() < deadline) {
-    let state: unknown;
-    try {
-      state = await tauriPage.evaluate(`(() => {
-        const importButton = document.querySelector('[data-testid="btn-import"]');
-        const main = document.querySelector('main');
-        const mainText = main?.textContent ?? '';
-
-        return {
-          pathname: window.location.pathname,
-          importVisible: importButton instanceof HTMLElement,
-          checkingGit: mainText.includes('Checking git'),
-        };
-      })()`);
-    } catch (error) {
-      if (!isMissingMainWindowError(error)) {
-        throw error;
-      }
-      await delay(200);
-      continue;
-    }
-
-    if (
-      state &&
-      typeof state === 'object' &&
-      'pathname' in state &&
-      'importVisible' in state &&
-      (state as { pathname: string }).pathname === '/' &&
-      (state as { importVisible: boolean }).importVisible
-    ) {
-      return;
-    }
-    await delay(200);
-  }
-
-  throw new Error('Home screen did not finish bootstrapping after reload');
-}
-
-async function clearCachedWorkspaceHint(tauriPage: AdapterPage) {
-  await tauriPage.evaluate(`(() => {
-    sessionStorage.removeItem('sg_workspace_hint');
-  })()`);
-}
-
-async function ensureWorkspaceResourcesStopped(tauriPage: AdapterPage) {
-  // Trigger backend teardown explicitly before directory cleanup. Relying only
-  // on route onDestroy is racy because those calls are fire-and-forget.
-  await tauriPage.evaluate(`(async () => {
-    const invoke = window.__TAURI_INTERNALS__?.invoke;
-    if (!invoke) return;
-
-    await Promise.allSettled([
-      invoke('close_all_terminals', {}),
-      invoke('stop_watching_worktrees', {}),
-    ]);
-  })()`);
 }
 
 async function waitForOptionalToastMessage(
@@ -141,45 +58,6 @@ async function waitForOptionalToastMessage(
     return true;
   } catch {
     return false;
-  }
-}
-
-export async function reloadToHome(tauriPage: AdapterPage) {
-  // reloadToHome has a strict budget: the entire beforeEach (including this
-  // function) must complete within the 90 s per-test timeout.  Every await
-  // below can burn up to STARTUP_UI_TIMEOUT (45 s), so keeping the chain
-  // short is critical.
-  //
-  // Sequence rationale:
-  //  1. waitForMainWindow        — ensure the window is alive before evaluating
-  //  2. clearCachedWorkspaceHint — remove sg_workspace_hint BEFORE navigation;
-  //                               this prevents the home page onMount from
-  //                               auto-navigating back to the previous workspace
-  //  3. ensureHome               — navigate to home via UI (clicks
-  //                               btn-back-projects when needed); on return,
-  //                               btn-import is visible — no extra waitForHomeReady
-  //
-  // A full window.location.reload() is NOT performed.  SvelteKit route
-  // navigation already tears down and remounts all page components, giving the
-  // same isolation as a hard reload.  The reload was the dominant cost on slow
-  // Windows CI runners (WebView cold-start ≈ 20–45 s), routinely pushing
-  // beforeEach past the 90 s test timeout.  The Tauri Playwright adapter
-  // cheatsheet also recommends UI-driven navigation over hard reloads as the
-  // suite default.
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      await waitForMainWindow(tauriPage, STARTUP_UI_TIMEOUT);
-      await ensureWorkspaceResourcesStopped(tauriPage);
-      await clearCachedWorkspaceHint(tauriPage);
-      await ensureHome(tauriPage);
-      await delay(150);
-      return;
-    } catch (error) {
-      if (attempt === 1) {
-        throw error;
-      }
-      await delay(250);
-    }
   }
 }
 

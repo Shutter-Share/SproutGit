@@ -1,29 +1,15 @@
 import { test, expect } from '../fixtures';
 import { dirname, join } from 'node:path';
-import {
-  createTestRepo,
-  querySqlite,
-  resetConfigDb,
-  resetTestDirs,
-  runGit,
-  writeRepoFile,
-} from '../helpers/fixtures';
+import { createTestRepo, querySqlite, runGit, writeRepoFile } from '../helpers/fixtures';
 import {
   createWorktreeViaUi,
   DEFAULT_UI_TIMEOUT,
   importRepoViaUi,
   openChangesTab,
   openHistoryTab,
-  reloadToHome,
 } from '../helpers/ui';
 
 test.describe('Commit workflow', () => {
-  test.beforeEach(async ({ tauriPage }) => {
-    resetConfigDb();
-    await reloadToHome(tauriPage);
-    resetTestDirs();
-  });
-
   test('stages and commits changes from a managed worktree', async ({ tauriPage }) => {
     const repoPath = createTestRepo('commit-test', { extraCommits: 1 });
 

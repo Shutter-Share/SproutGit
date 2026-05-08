@@ -15,8 +15,6 @@ import {
   executeSqlite,
   mergeNoFastForward,
   querySqlite,
-  resetConfigDb,
-  resetTestDirs,
   runGit,
   writeRepoFile,
 } from '../helpers/fixtures';
@@ -27,7 +25,6 @@ import {
   importRepoViaUi,
   openChangesTab,
   openHistoryTab,
-  reloadToHome,
   selectWorktreeViaUi,
   stageAndCommitViaUi,
 } from '../helpers/ui';
@@ -194,18 +191,6 @@ function dailyAfterCreateTerminalHook(marker: string) {
 }
 
 test.describe('Daily developer workflow', () => {
-  test.beforeEach(async ({ tauriPage }) => {
-    // Delete the config DB first (no EBUSY risk — it lives in a separate run-scoped
-    // directory, not the workspace dir the watcher holds open).
-    resetConfigDb();
-    // Navigate the app to the home screen BEFORE deleting test directories.
-    // On Windows, the Tauri file watcher holds open handles on the worktrees
-    // directory from the previous test. Navigating away first causes the
-    // backend to stop watching, releasing those handles before rmSync runs.
-    await reloadToHome(tauriPage);
-    resetTestDirs();
-  });
-
   // ---------------------------------------------------------------------------
   // Story 1: Morning standup — set up two feature branches as worktrees
   // ---------------------------------------------------------------------------
