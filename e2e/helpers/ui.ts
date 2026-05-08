@@ -116,6 +116,20 @@ async function clearCachedWorkspaceHint(tauriPage: AdapterPage) {
   })()`);
 }
 
+async function ensureWorkspaceResourcesStopped(tauriPage: AdapterPage) {
+  // Trigger backend teardown explicitly before directory cleanup. Relying only
+  // on route onDestroy is racy because those calls are fire-and-forget.
+  await tauriPage.evaluate(`(async () => {
+    const invoke = window.__TAURI_INTERNALS__?.invoke;
+    if (!invoke) return;
+
+    await Promise.allSettled([
+      invoke('close_all_terminals', {}),
+      invoke('stop_watching_worktrees', {}),
+    ]);
+  })()`);
+}
+
 async function waitForOptionalToastMessage(
   tauriPage: AdapterPage,
   type: 'success' | 'error' | 'warning' | 'info',
@@ -155,8 +169,10 @@ export async function reloadToHome(tauriPage: AdapterPage) {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       await waitForMainWindow(tauriPage, STARTUP_UI_TIMEOUT);
+      await ensureWorkspaceResourcesStopped(tauriPage);
       await clearCachedWorkspaceHint(tauriPage);
       await ensureHome(tauriPage);
+      await delay(150);
       return;
     } catch (error) {
       if (attempt === 1) {
