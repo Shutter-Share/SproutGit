@@ -108,10 +108,11 @@ export const test = base.extend<Fixtures>({
       client?.disconnect();
       processManager?.stop();
       // Grace period for background threads (wait-threads, stream readers) to
-      // cleanly exit and release file handles before fixture cleanup deletes
-      // test directories. On Windows, handle release can lag 50–500ms after
-      // process termination.
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // cleanly exit and release file handles before the next test's cleanup
+      // tries to delete test directories. On Windows, handle release can lag
+      // 50–1500ms after process termination due to OS file system cache and
+      // thread cleanup. Use 2 seconds to accommodate slow CI runners.
+      await new Promise((resolve) => setTimeout(resolve, 2000));
     }
   },
 });

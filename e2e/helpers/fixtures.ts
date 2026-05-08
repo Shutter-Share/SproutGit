@@ -141,6 +141,12 @@ export function setupTestDirs() {
 }
 
 export function resetTestDirs() {
+  // Windows file-system handles can lag 50–1500ms after process termination.
+  // The fixture already waits 2 seconds post-shutdown, but add a final grace
+  // period here before cleanup attempts to minimize transient EBUSY failures.
+  if (process.platform === 'win32') {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
+  }
   cleanupTestDirs();
   setupTestDirs();
 }
