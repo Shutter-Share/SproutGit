@@ -94,8 +94,8 @@ Key reminders:
 - Prefer per-spec `beforeEach` reset hooks over global Playwright lifecycle hooks for stateful E2E flows.
 - For E2E isolation, reset both the test workspace directory and the isolated config DB, then return to the project picker with stable in-app navigation (`ensureHome()`-style helpers). Avoid making full webview reloads the default reset path for the suite.
 - Current default runtime is headless Playwright in `e2e/playwright.config.ts`; do not switch to headed by default.
-- During reset, clear cached workspace hints (`sg_workspace_hint`) and perform a verified in-webview reload so each test starts from a clean project picker state.
-- In E2E `beforeEach` hooks, run `reloadToHome()` before `resetTestDirs()` / `resetConfigDb()`. This ensures workspace-page `onDestroy` cleanup stops file watchers before filesystem deletion, preventing cross-test lock/handle flakes (notably `EBUSY`/`EPERM` on Windows and stale-workspace leakage on macOS/Linux).
+- During reset, clear cached workspace hints (`sg_workspace_hint`) **before** navigating home; the clear must happen before the home page mounts so `onMount` never auto-navigates back to the previous workspace. Do not perform a full `window.location.reload()` — UI-driven navigation already tears down and remounts all page components, and hard reloads cost 20–45 s on slow Windows CI runners.
+- In E2E `beforeEach` hooks, the required reset order is: `resetConfigDb()` → `reloadToHome()` → `resetTestDirs()`. Rationale: (1) `resetConfigDb()` first so the app never queries a deleted schema; the config DB lives in a separate run-scoped directory with no watcher or process holding it open. (2) `reloadToHome()` second so the workspace `onDestroy` fires `closeAllTerminals()` + `stopWatchingWorktrees()` before any filesystem cleanup — PTY children (PowerShell on Windows) hold CWD handles on worktree directories, and watchers hold directory handles. (3) `resetTestDirs()` last, after those handles are released.
 
 ### E2E Selector Strategy (Required)
 

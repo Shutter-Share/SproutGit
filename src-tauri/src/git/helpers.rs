@@ -374,12 +374,18 @@ where
         .wait()
         .map_err(|e| format!("Failed to wait for git action '{}': {e}", action.label()))?;
 
-    let stdout_bytes = stdout_thread
-        .join()
-        .map_err(|_| format!("stdout drain thread panicked for git action '{}'", action.label()))??;
-    let stderr_bytes = stderr_thread
-        .join()
-        .map_err(|_| format!("stderr drain thread panicked for git action '{}'", action.label()))??;
+    let stdout_bytes = stdout_thread.join().map_err(|_| {
+        format!(
+            "stdout drain thread panicked for git action '{}'",
+            action.label()
+        )
+    })??;
+    let stderr_bytes = stderr_thread.join().map_err(|_| {
+        format!(
+            "stderr drain thread panicked for git action '{}'",
+            action.label()
+        )
+    })??;
 
     Ok(Output {
         status,
