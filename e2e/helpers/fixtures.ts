@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Faker, en } from '@faker-js/faker';
@@ -86,20 +86,30 @@ export function runGit(cwd: string, args: string[], extraEnv: Record<string, str
 }
 
 export function cleanupTestDirs() {
-  // On Windows the notify watcher (or git itself) can hold directory handles
-  // briefly after the watcher is stopped. Retry a few times before giving up.
-  const maxAttempts = process.platform === 'win32' ? 20 : 1;
-  const retryDelayMs = 250;
+  if (!existsSync(TEST_DIR)) {
+    return;
+  }
+
+  // On Windows the notify watcher and terminal child processes can keep a
+  // worktree directory handle alive briefly after teardown begins. Keep trying
+  // with a bounded linear backoff so CI can absorb transient release latency.
+  const maxAttempts = process.platform === 'win32' ? 45 : 1;
+  const baseRetryDelayMs = 250;
+  const maxRetryDelayMs = 1_500;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       rmSync(TEST_DIR, { recursive: true, force: true });
       return;
     } catch (err: unknown) {
+      if (!existsSync(TEST_DIR)) {
+        return;
+      }
       const isLastAttempt = attempt === maxAttempts;
       const code = err instanceof Error && 'code' in err ? (err as NodeJS.ErrnoException).code : '';
       const isRetryable = code === 'EBUSY' || code === 'EPERM' || code === 'ENOTEMPTY';
       if (isLastAttempt || !isRetryable) throw err;
       // Synchronous busy-wait: sleep between retries.
+      const retryDelayMs = Math.min(baseRetryDelayMs * attempt, maxRetryDelayMs);
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, retryDelayMs);
     }
   }
