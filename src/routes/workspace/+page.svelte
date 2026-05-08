@@ -706,6 +706,9 @@
   const selectedWorktree = $derived(
     worktrees.find(item => pathsEqual(item.path, activeWorktreePath)) ?? null
   );
+  const hasManagedWorktreeSelection = $derived(
+    Boolean(selectedWorktree && !pathsEqual(selectedWorktree.path, workspace?.rootPath))
+  );
 
   function compareRefsForCreate(a: RefInfo, b: RefInfo): number {
     const rank = (ref: RefInfo): number => {
@@ -808,7 +811,7 @@
     }
   });
 
-  const canUseWorktreeViews = $derived(Boolean(selectedWorktree && !activeIsRoot));
+  const canUseChangesView = $derived(hasManagedWorktreeSelection);
 
   // Per-worktree change counts for sidebar badges
   let worktreeChangeCounts = $state<Record<string, number>>({});
@@ -896,8 +899,10 @@
   }
 
   async function loadWorktreeStatus() {
-    if (!selectedWorktree) {
+    if (!selectedWorktree || !hasManagedWorktreeSelection) {
       worktreeStatus = [];
+      stagingDiffFile = null;
+      stagingDiffContent = '';
       return;
     }
     statusLoading = true;
@@ -942,6 +947,19 @@
   }
 
   async function refreshWorktreeStatusFromWatcher(changedPath: string) {
+    if (deleting && pathsEqual(changedPath, deleting)) {
+      return;
+    }
+
+    if (workspace && pathsEqual(changedPath, workspace.rootPath)) {
+      if (!hasManagedWorktreeSelection) {
+        worktreeStatus = [];
+        stagingDiffFile = null;
+        stagingDiffContent = '';
+      }
+      return;
+    }
+
     const result = await getWorktreeStatus(changedPath);
     worktreeChangeCounts[changedPath] = result.files.length;
     if (pathsEqual(changedPath, selectedWorktree?.path)) {
@@ -1108,6 +1126,12 @@
     }
   });
 
+  $effect(() => {
+    if (activeTab === 'changes' && !canUseChangesView) {
+      activeTab = 'history';
+    }
+  });
+
   // ── File Watcher ──
 
   let unlistenWorktreeChanged: (() => void) | null = null;
@@ -1117,6 +1141,9 @@
     // listWorktrees returns forward-slash paths. Normalise separators only —
     // never lowercase, since Linux filesystems are case-sensitive.
     const changedPath = normalizePathSeparators(changedPathRaw);
+    if (deleting && pathsEqual(changedPath, deleting)) {
+      return;
+    }
     if (stagingAction || committing) {
       queueWatcherRefresh(changedPath);
       return;
@@ -1541,6 +1568,24 @@
       onconfirm: async () => {
         confirmDialog = null;
         deleting = wt.path;
+        const nextWorktreePath =
+          worktrees.find(
+            worktree =>
+              !pathsEqual(worktree.path, wt.path) && !pathsEqual(worktree.path, workspace!.rootPath)
+          )?.path ??
+          worktrees.find(worktree => !pathsEqual(worktree.path, wt.path))?.path ??
+          null;
+        const { [wt.path]: _removedChangeCount, ...remainingChangeCounts } = worktreeChangeCounts;
+        worktreeChangeCounts = remainingChangeCounts;
+
+        if (activeWorktreePath && pathsEqual(activeWorktreePath, wt.path)) {
+          activeWorktreePath = nextWorktreePath;
+          activeTerminalPath = nextWorktreePath ?? workspace!.workspacePath;
+          worktreeStatus = [];
+          stagingDiffFile = null;
+          stagingDiffContent = '';
+        }
+
         try {
           await beginOperation(
             'Removing worktree',
@@ -1553,13 +1598,6 @@
             await refreshWorkspaceData();
           } catch {
             worktrees = worktrees.filter(worktree => worktree.path !== wt.path);
-          }
-          if (activeWorktreePath === wt.path) {
-            activeWorktreePath =
-              worktrees.find(w => !pathsEqual(w.path, workspace!.rootPath))?.path ??
-              worktrees[0]?.path ??
-              null;
-            activeTerminalPath = activeWorktreePath ?? workspace!.workspacePath;
           }
         } catch (err) {
           failOperation(String(err));
@@ -2476,10 +2514,8 @@
           >
             <button
               onclick={() => {
-                if (!canUseWorktreeViews) return;
                 activeTab = 'history';
               }}
-              disabled={!canUseWorktreeViews}
               data-testid="tab-history"
               class="relative px-3 py-2 text-xs font-medium transition-colors {activeTab ===
               'history'
@@ -2495,10 +2531,10 @@
             </button>
             <button
               onclick={() => {
-                if (!canUseWorktreeViews) return;
+                if (!canUseChangesView) return;
                 activeTab = 'changes';
               }}
-              disabled={!canUseWorktreeViews}
+              disabled={!canUseChangesView}
               data-testid="tab-changes"
               class="relative flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors {activeTab ===
               'changes'
@@ -2506,7 +2542,7 @@
                 : 'text-[var(--sg-text-dim)] hover:text-[var(--sg-text)]'} disabled:cursor-not-allowed disabled:opacity-50"
             >
               Changes
-              {#if worktreeStatus.length > 0}
+              {#if canUseChangesView && worktreeStatus.length > 0}
                 <span
                   class="rounded-full bg-[var(--sg-warning)]/20 px-1.5 py-0.5 text-[9px] font-bold text-[var(--sg-warning)]"
                 >
@@ -2914,7 +2950,7 @@
               {/if}
             </div>
           </div>
-        {:else if activeTab === 'history' || !selectedWorktree || activeIsRoot}
+        {:else if activeTab === 'history'}
           <!-- Commit graph -->
           <div class="flex min-h-0 {selectedCommits.length > 0 ? 'h-1/2' : 'flex-1'} flex-col">
             <div

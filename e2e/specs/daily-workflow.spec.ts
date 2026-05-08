@@ -619,9 +619,14 @@ test.describe('Daily developer workflow', () => {
     await changesTab.waitFor(DEFAULT_UI_TIMEOUT);
     await terminalTab.waitFor(DEFAULT_UI_TIMEOUT);
 
-    expect(await historyTab.getAttribute('disabled')).not.toBeNull();
+    expect(await historyTab.getAttribute('disabled')).toBeNull();
     expect(await changesTab.getAttribute('disabled')).not.toBeNull();
     expect(await terminalTab.getAttribute('disabled')).toBeNull();
+
+    await historyTab.click();
+    await tauriPage.evaluate(`(() => {
+      return (document.body?.textContent ?? '').includes('Commit graph');
+    })()`);
 
     await terminalTab.click();
 
