@@ -106,13 +106,34 @@ export const test = base.extend<Fixtures>({
       await use(tauriPage);
     } finally {
       client?.disconnect();
+
+      // On Windows, processManager.stop() calls TerminateProcess() on the Tauri
+      // parent process only. Child processes spawned by the Tauri app (e.g.
+      // PowerShell hook terminals) are NOT in the same Windows Job Object and
+      // are NOT killed — they become orphaned with their CWD still pointing at
+      // worktree directories, causing EBUSY on rmSync in the next test's reset.
+      //
+      // Fix: use `taskkill /F /T /PID` to kill the entire process tree before
+      // calling stop(), so all child processes release their directory handles.
+      if (IS_WINDOWS && processManager) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const pid = (processManager as any).process?.pid as number | undefined;
+        if (pid) {
+          try {
+            const { execSync } = await import('node:child_process');
+            execSync(`taskkill /F /T /PID ${pid}`, { stdio: 'ignore' });
+          } catch {
+            // Process may already have exited — ignore
+          }
+        }
+      }
+
       processManager?.stop();
-      // Grace period for background threads (wait-threads, stream readers) to
-      // cleanly exit and release file handles before the next test's cleanup
-      // tries to delete test directories. On Windows, handle release can lag
-      // 50–1500ms after process termination due to OS file system cache and
-      // thread cleanup. Use 2 seconds to accommodate slow CI runners.
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      // Short grace period for the OS to fully release file handles after the
+      // process tree is terminated. taskkill /F /T is synchronous so 500ms is
+      // sufficient; the previous 2s was compensating for orphaned children that
+      // are now killed above.
+      await new Promise((resolve) => setTimeout(resolve, 500));
     }
   },
 });
