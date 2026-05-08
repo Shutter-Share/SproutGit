@@ -45,6 +45,10 @@ struct PtySession {
 
 pub struct TerminalManager {
     sessions: Arc<Mutex<HashMap<String, Arc<PtySession>>>>,
+    /// Set of pty_ids for non-interactive hook terminals. These are spawned
+    /// via std::process::Command (not PTY). The child processes are owned by
+    /// wait-threads and removed from this set when those threads complete.
+    non_interactive_pids: Arc<Mutex<std::collections::HashSet<String>>>,
     /// Map of hook_id → epoch milliseconds at which that hook's terminal
     /// session exited.  Populated by the non-interactive PTY wait-thread when a
     /// session was spawned with a `hook_id` argument.  Read by the
@@ -59,6 +63,7 @@ impl TerminalManager {
     pub fn new() -> Self {
         Self {
             sessions: Arc::new(Mutex::new(HashMap::new())),
+            non_interactive_pids: Arc::new(Mutex::new(std::collections::HashSet::new())),
             closed_hook_terminals: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -200,7 +205,16 @@ pub async fn spawn_terminal(
             .spawn()
             .map_err(|e| format!("Failed to spawn shell '{shell}': {e}"))?;
 
+        // Register this non-interactive terminal's pty_id for tracking.
         let pty_id_clone = pty_id.clone();
+        {
+            let mut non_interactive = state
+                .non_interactive_pids
+                .lock()
+                .map_err(|_| "Failed to lock non-interactive terminals".to_string())?;
+            non_interactive.insert(pty_id_clone.clone());
+        }
+
         let app_stdout = app_handle.clone();
         let app_stderr = app_handle.clone();
         let app_closed = app_handle.clone();
@@ -245,8 +259,14 @@ pub async fn spawn_terminal(
         // deterministic completion signal.
         let closed_map = Arc::clone(&state.closed_hook_terminals);
         let hook_id_for_thread = validated_hook_id.clone();
+        let non_interactive_pids = Arc::clone(&state.non_interactive_pids);
+        let pty_id_for_cleanup = pty_id_clone.clone();
         std::thread::spawn(move || {
             let _ = child.wait();
+            // Remove this terminal from tracking since it's done
+            if let Ok(mut set) = non_interactive_pids.lock() {
+                set.remove(&pty_id_for_cleanup);
+            }
             if let Some(hook_id) = hook_id_for_thread {
                 let now_ms = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -451,6 +471,11 @@ pub async fn close_all_terminals(state: tauri::State<'_, TerminalManager>) -> Re
         }
     }
     sessions.clear();
+
+    // Non-interactive terminals are tracked in non_interactive_pids for
+    // monitoring, but their child processes are owned by wait-threads and
+    // cannot be directly killed from here. The E2E fixture cleanup grace
+    // period (500ms) allows those threads to naturally exit and release handles.
 
     Ok(())
 }
