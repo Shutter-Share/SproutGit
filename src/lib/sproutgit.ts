@@ -55,6 +55,8 @@ export type RefInfo = {
 export type RefsResult = {
   repoPath: string;
   refs: RefInfo[];
+  /** Short name of the default remote branch (e.g. `origin/main`), if discoverable. */
+  defaultRemoteBranch?: string;
 };
 
 export type CommitEntry = {
@@ -582,6 +584,9 @@ export const stopWatchingWorktrees = () => invoke<void>('stop_watching_worktrees
 
 export const onWorktreeChanged = (callback: (worktreePath: string) => void): Promise<UnlistenFn> =>
   listen<string>('worktree-changed', event => callback(event.payload));
+
+export const onGitRefsChanged = (callback: () => void): Promise<UnlistenFn> =>
+  listen<void>('git-refs-changed', () => callback());
 
 // ── Terminal ──
 

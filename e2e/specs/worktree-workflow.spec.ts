@@ -1,26 +1,9 @@
 import { test, expect } from '../fixtures';
-import {
-  createTestRepo,
-  querySqlite,
-  resetConfigDb,
-  resetTestDirs,
-  runGit,
-} from '../helpers/fixtures';
-import {
-  createWorktreeViaUi,
-  DEFAULT_UI_TIMEOUT,
-  importRepoViaUi,
-  reloadToHome,
-} from '../helpers/ui';
+import { createTestRepo, querySqlite, runGit } from '../helpers/fixtures';
+import { createWorktreeViaUi, DEFAULT_UI_TIMEOUT, importRepoViaUi } from '../helpers/ui';
 import { dirname, join } from 'node:path';
 
 test.describe('Worktree workflow', () => {
-  test.beforeEach(async ({ tauriPage }) => {
-    resetConfigDb();
-    await reloadToHome(tauriPage);
-    resetTestDirs();
-  });
-
   test('creates, switches, and deletes managed worktrees', async ({ tauriPage }) => {
     const repoPath = createTestRepo('worktree-test', {
       extraCommits: 2,

@@ -7,6 +7,7 @@ import {
 } from '@srsholmes/tauri-playwright';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { resetConfigDb, resetTestDirs } from './helpers/fixtures';
 
 const MCP_SOCKET =
   process.env.SPROUTGIT_PLAYWRIGHT_SOCKET_PATH ?? join(tmpdir(), 'sproutgit-playwright.sock');
@@ -42,15 +43,28 @@ function parseCommandSpec(spec: string): { command: string; args: string[] } {
 
 type Fixtures = {
   mode: 'tauri';
+  _resetE2EState: void;
   tauriPage: TauriPage;
 };
 
 export const test = base.extend<Fixtures>({
   mode: ['tauri', { option: true }],
-  tauriPage: async ({ mode }, use) => {
+  _resetE2EState: [
+    async ({}, use) => {
+      // Reset disk state before the app launches so startup code never races
+      // the config DB deletion or workspace directory cleanup.
+      resetConfigDb();
+      resetTestDirs();
+      await use();
+    },
+    { auto: true },
+  ],
+  tauriPage: async ({ mode, _resetE2EState }, use) => {
     if (mode !== 'tauri') {
       throw new Error(`Unsupported E2E mode: ${mode}`);
     }
+
+    void _resetE2EState;
 
     let processManager: TauriProcessManager | null = null;
     let client: PluginClient | null = null;
@@ -92,7 +106,34 @@ export const test = base.extend<Fixtures>({
       await use(tauriPage);
     } finally {
       client?.disconnect();
+
+      // On Windows, processManager.stop() calls TerminateProcess() on the Tauri
+      // parent process only. Child processes spawned by the Tauri app (e.g.
+      // PowerShell hook terminals) are NOT in the same Windows Job Object and
+      // are NOT killed — they become orphaned with their CWD still pointing at
+      // worktree directories, causing EBUSY on rmSync in the next test's reset.
+      //
+      // Fix: use `taskkill /F /T /PID` to kill the entire process tree before
+      // calling stop(), so all child processes release their directory handles.
+      if (IS_WINDOWS && processManager) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const pid = (processManager as any).process?.pid as number | undefined;
+        if (pid) {
+          try {
+            const { execSync } = await import('node:child_process');
+            execSync(`taskkill /F /T /PID ${pid}`, { stdio: 'ignore' });
+          } catch {
+            // Process may already have exited — ignore
+          }
+        }
+      }
+
       processManager?.stop();
+      // Short grace period for the OS to fully release file handles after the
+      // process tree is terminated. taskkill /F /T is synchronous so 500ms is
+      // sufficient; the previous 2s was compensating for orphaned children that
+      // are now killed above.
+      await new Promise((resolve) => setTimeout(resolve, 500));
     }
   },
 });

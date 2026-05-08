@@ -140,9 +140,9 @@ If each process computes independently, worker and webServer can drift and fail 
 - Keep webServer startup timeout modest (around 90s).
 - Keep plugin connect timeout modest (around 30s).
 - Fail fast on startup error toasts, and attach them to test artifacts.
-- Reset state per spec in `beforeEach`, not via a global Playwright hook.
-- For per-test isolation, delete the E2E workspace dir and config DB, then return to the home screen with stable in-app navigation.
-- Prefer a persistent app process plus per-test state reset over restarting Tauri between tests.
+- Reset disk state in the fixture before launching Tauri for each test.
+- For per-test isolation, delete the E2E workspace dir and config DB before app startup; do not delete them from a spec-level `beforeEach` after the app has already opened them.
+- Keep the app lifecycle model consistent. If the fixture launches a fresh Tauri process per test, specs should not layer an in-app reset path on top of that.
 
 ## Debug Checklist
 
@@ -190,10 +190,15 @@ These are real failures we have already hit in this repo and what they usually m
 
 7. `Failed to load config ... database is locked` during E2E state reset
 
-- Meaning: test cleanup deleted or mutated the config DB while an operation still had it open, or multiple processes shared the same config DB.
-- Fix: scope `SPROUTGIT_CONFIG_DB_PATH` per run, keep workers at `1`, and reset the config DB before the next test starts. SproutGit opens config DB connections on demand, so deleting the isolated DB between tests is safe when no command is actively using it.
+ - Meaning: test cleanup deleted or mutated the config DB while the app had already started and still had it open, or multiple processes shared the same config DB.
+ - Fix: scope `SPROUTGIT_CONFIG_DB_PATH` per run, keep workers at `1`, and reset the config DB before launching the next test's app process.
 
 8. Full suite flakes when using hard reload in every `beforeEach`
 
 - Meaning: forcing `window.location.assign('/')` / `window.location.reload()` before each spec can be less stable than UI-driven navigation in `tauri` mode when tests share one long-lived app process.
 - Fix: use a persistent app process, reset disk state between tests, and use an `ensureHome()` helper that clicks back to the project list and waits for stable home-screen test IDs. Keep hard reloads as a targeted debugging tool, not the suite default.
+
+9. `beforeEach` times out before the first assertion on Windows
+
+- Meaning: the suite is spending its timeout budget deleting files or waiting on teardown after the app already launched.
+- Fix: move reset into the fixture so config/workspace cleanup happens before `TauriProcessManager.start()`.

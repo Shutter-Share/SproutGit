@@ -65,11 +65,12 @@ pub enum GitAction {
     Pull,
     ListRemotes,
     CheckIgnore,
+    SymbolicRef,
 }
 
 impl GitAction {
     #[cfg(test)]
-    pub const ALL: [GitAction; 32] = [
+    pub const ALL: [GitAction; 33] = [
         GitAction::GitInfo,
         GitAction::WorktreeList,
         GitAction::ListRefs,
@@ -102,6 +103,7 @@ impl GitAction {
         GitAction::Pull,
         GitAction::ListRemotes,
         GitAction::CheckIgnore,
+        GitAction::SymbolicRef,
     ];
 
     pub fn label(self) -> &'static str {
@@ -138,6 +140,7 @@ impl GitAction {
             GitAction::Pull => "pull",
             GitAction::ListRemotes => "list_remotes",
             GitAction::CheckIgnore => "check_ignore",
+            GitAction::SymbolicRef => "symbolic_ref",
         }
     }
 }

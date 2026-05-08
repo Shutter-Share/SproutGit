@@ -48,6 +48,8 @@ pub struct RefInfo {
 pub struct RefsResult {
     pub repo_path: String,
     pub refs: Vec<RefInfo>,
+    /// Short name of the default remote branch (e.g. `origin/main`), if discoverable.
+    pub default_remote_branch: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -435,6 +437,8 @@ pub async fn list_refs(repo_path: String) -> Result<RefsResult, String> {
                 "tag"
             };
 
+                    // Skip origin/HEAD (symbolic ref pointing to default branch);
+                    // the default branch is discovered separately below via symbolic-ref.
             if kind == "remote" && short_name.ends_with("/HEAD") {
                 return None;
             }
@@ -448,9 +452,32 @@ pub async fn list_refs(repo_path: String) -> Result<RefsResult, String> {
         })
         .collect();
 
+    // Discover the default remote branch via symbolic-ref (e.g. origin/HEAD -> origin/main).
+    // Failures are non-fatal; repos without a configured origin/HEAD simply get None.
+    let default_remote_branch = run_git(
+        GitAction::SymbolicRef,
+        &[
+            "-C",
+            &canonical.to_string_lossy(),
+            "symbolic-ref",
+            "--short",
+            "refs/remotes/origin/HEAD",
+        ],
+    )
+    .ok()
+    .and_then(|o| {
+        if o.status.success() {
+            let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if s.is_empty() { None } else { Some(s) }
+        } else {
+            None
+        }
+    });
+
     Ok(RefsResult {
         repo_path: path_to_frontend(&canonical),
         refs,
+        default_remote_branch,
     })
 }
 

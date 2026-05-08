@@ -43,6 +43,7 @@
     stopWatchingWorktrees,
     closeAllTerminals,
     onWorktreeChanged,
+    onGitRefsChanged,
     getAppSetting,
     listAvailableShells,
     type StatusFileEntry,
@@ -62,6 +63,7 @@
   import { tildify } from '$lib/paths.svelte';
   import { findPath, normalizePathSeparators, pathStartsWith, pathsEqual } from '$lib/path-utils';
   import { validateBranchName, validateSourceRef } from '$lib/validation';
+  import { makeCompareRefsForCreate, preferredSourceRef } from '$lib/ref-utils';
   import { openPath } from '@tauri-apps/plugin-opener';
   import {
     FolderOpen,
@@ -90,6 +92,7 @@
   let worktrees = $state<WorktreeInfo[]>([]);
   let graph = $state<CommitGraphResult | null>(null);
   let refs = $state<RefInfo[]>([]);
+  let defaultRemoteBranch = $state<string | undefined>(undefined);
   let selectedRef = $state('');
   let newBranch = $state('');
   let activeWorktreePath = $state<string | null>(null);
@@ -712,26 +715,11 @@
   const selectedWorktree = $derived(
     worktrees.find(item => pathsEqual(item.path, activeWorktreePath)) ?? null
   );
+  const hasManagedWorktreeSelection = $derived(
+    Boolean(selectedWorktree && !pathsEqual(selectedWorktree.path, workspace?.rootPath))
+  );
 
-  function compareRefsForCreate(a: RefInfo, b: RefInfo): number {
-    const rank = (ref: RefInfo): number => {
-      if (ref.kind === 'remote' && ref.name.startsWith('upstream/')) return 0;
-      if (ref.kind === 'remote' && ref.name.startsWith('origin/')) return 1;
-      if (ref.kind === 'remote') return 2;
-      if (ref.kind === 'branch') return 3;
-      return 4;
-    };
-
-    const rankDiff = rank(a) - rank(b);
-    if (rankDiff !== 0) return rankDiff;
-    return a.name.localeCompare(b.name);
-  }
-
-  function preferredSourceRef(refList: RefInfo[]): string {
-    const sorted = [...refList].sort(compareRefsForCreate);
-    const preferred = sorted.find(ref => ref.kind === 'remote') ?? sorted[0];
-    return preferred?.name ?? 'HEAD';
-  }
+  const compareRefsForCreate = $derived(makeCompareRefsForCreate(defaultRemoteBranch));
 
   const sortedRefsForCreate = $derived([...refs].sort(compareRefsForCreate));
   const refItems = $derived(
@@ -809,7 +797,7 @@
     }
   });
 
-  const canUseWorktreeViews = $derived(Boolean(selectedWorktree && !activeIsRoot));
+  const canUseChangesView = $derived(hasManagedWorktreeSelection);
 
   // Per-worktree change counts for sidebar badges
   let worktreeChangeCounts = $state<Record<string, number>>({});
@@ -897,8 +885,10 @@
   }
 
   async function loadWorktreeStatus() {
-    if (!selectedWorktree) {
+    if (!selectedWorktree || !hasManagedWorktreeSelection) {
       worktreeStatus = [];
+      stagingDiffFile = null;
+      stagingDiffContent = '';
       return;
     }
     statusLoading = true;
@@ -943,6 +933,19 @@
   }
 
   async function refreshWorktreeStatusFromWatcher(changedPath: string) {
+    if (deleting && pathsEqual(changedPath, deleting)) {
+      return;
+    }
+
+    if (workspace && pathsEqual(changedPath, workspace.rootPath)) {
+      if (!hasManagedWorktreeSelection) {
+        worktreeStatus = [];
+        stagingDiffFile = null;
+        stagingDiffContent = '';
+      }
+      return;
+    }
+
     const result = await getWorktreeStatus(changedPath);
     worktreeChangeCounts[changedPath] = result.files.length;
     if (pathsEqual(changedPath, selectedWorktree?.path)) {
@@ -1109,6 +1112,12 @@
     }
   });
 
+  $effect(() => {
+    if (activeTab === 'changes' && !canUseChangesView) {
+      activeTab = 'history';
+    }
+  });
+
   // ── File Watcher ──
 
   let unlistenWorktreeChanged: (() => void) | null = null;
@@ -1118,6 +1127,9 @@
     // listWorktrees returns forward-slash paths. Normalise separators only —
     // never lowercase, since Linux filesystems are case-sensitive.
     const changedPath = normalizePathSeparators(changedPathRaw);
+    if (deleting && pathsEqual(changedPath, deleting)) {
+      return;
+    }
     if (stagingAction || committing) {
       queueWatcherRefresh(changedPath);
       return;
@@ -1203,8 +1215,9 @@
 
       worktrees = worktreeData.worktrees;
       refs = refsData.refs;
+      defaultRemoteBranch = refsData.defaultRemoteBranch;
       initializeGraphState(graphData);
-      selectedRef = preferredSourceRef(refsData.refs);
+      selectedRef = preferredSourceRef(refsData.refs, refsData.defaultRemoteBranch);
 
       if (graphHasMore) {
         // Fetch total commit count in the background only when the first page is partial.
@@ -1264,6 +1277,9 @@
 
     creating = true;
     error = '';
+    // Close the modal immediately so the operation status banner (hook progress)
+    // is visible behind the now-dismissed dialog while hooks are running.
+    createModalOpen = false;
 
     try {
       await beginOperation(
@@ -1339,9 +1355,29 @@
 
   const unlistenHookProgress = onHookProgress(handleHookProgress);
   const unlistenHookTerminalLaunch = onHookTerminalLaunch(handleHookTerminalLaunch);
+  // When git refs change externally (e.g. terminal commits/checkouts), refresh
+  // Debounce rapid ref-change events (e.g. fetch/repack emits several in quick
+  // succession) and prevent overlapping full refreshes with an in-flight guard.
+  let refsChangedTimer: ReturnType<typeof setTimeout> | null = null;
+  let refsRefreshInFlight = false;
+  // the graph and worktrees list so the History tab stays up to date.
+  const unlistenGitRefsChanged = onGitRefsChanged(() => {
+    if (committing || stagingAction) return;
+    if (refsChangedTimer !== null) clearTimeout(refsChangedTimer);
+    refsChangedTimer = setTimeout(() => {
+      refsChangedTimer = null;
+      if (refsRefreshInFlight) return;
+      refsRefreshInFlight = true;
+      void refreshWorkspaceData().finally(() => {
+        refsRefreshInFlight = false;
+      });
+    }, 300);
+  });
   onDestroy(() => {
+    if (refsChangedTimer !== null) clearTimeout(refsChangedTimer);
     void unlistenHookProgress.then(unlisten => unlisten());
     void unlistenHookTerminalLaunch.then(unlisten => unlisten());
+    void unlistenGitRefsChanged.then(unlisten => unlisten());
   });
 
   function handleHookTerminalLaunch(event: HookTerminalLaunchEvent) {
@@ -1542,6 +1578,24 @@
       onconfirm: async () => {
         confirmDialog = null;
         deleting = wt.path;
+        const nextWorktreePath =
+          worktrees.find(
+            worktree =>
+              !pathsEqual(worktree.path, wt.path) && !pathsEqual(worktree.path, workspace!.rootPath)
+          )?.path ??
+          worktrees.find(worktree => !pathsEqual(worktree.path, wt.path))?.path ??
+          null;
+        const { [wt.path]: _removedChangeCount, ...remainingChangeCounts } = worktreeChangeCounts;
+        worktreeChangeCounts = remainingChangeCounts;
+
+        if (activeWorktreePath && pathsEqual(activeWorktreePath, wt.path)) {
+          activeWorktreePath = nextWorktreePath;
+          activeTerminalPath = nextWorktreePath ?? workspace!.workspacePath;
+          worktreeStatus = [];
+          stagingDiffFile = null;
+          stagingDiffContent = '';
+        }
+
         try {
           await beginOperation(
             'Removing worktree',
@@ -1554,13 +1608,6 @@
             await refreshWorkspaceData();
           } catch {
             worktrees = worktrees.filter(worktree => worktree.path !== wt.path);
-          }
-          if (activeWorktreePath === wt.path) {
-            activeWorktreePath =
-              worktrees.find(w => !pathsEqual(w.path, workspace!.rootPath))?.path ??
-              worktrees[0]?.path ??
-              null;
-            activeTerminalPath = activeWorktreePath ?? workspace!.workspacePath;
           }
         } catch (err) {
           failOperation(String(err));
@@ -1679,6 +1726,7 @@
     worktrees = refreshedWt.worktrees;
     initializeGraphState(refreshedGraph);
     refs = refreshedRefs.refs;
+    defaultRemoteBranch = refreshedRefs.defaultRemoteBranch;
     if (graphHasMore) {
       // Refresh total commit count in the background only when the graph is partial.
       totalCommitCount = null;
@@ -2204,7 +2252,7 @@
             <button
               type="button"
               onclick={() => {
-                selectedRef = preferredSourceRef(refs);
+                selectedRef = preferredSourceRef(refs, defaultRemoteBranch);
                 createModalOpen = true;
                 formTouched = { branch: false, ref: false };
               }}
@@ -2488,10 +2536,8 @@
           >
             <button
               onclick={() => {
-                if (!canUseWorktreeViews) return;
                 activeTab = 'history';
               }}
-              disabled={!canUseWorktreeViews}
               data-testid="tab-history"
               class="relative px-3 py-2 text-xs font-medium transition-colors {activeTab ===
               'history'
@@ -2507,10 +2553,10 @@
             </button>
             <button
               onclick={() => {
-                if (!canUseWorktreeViews) return;
+                if (!canUseChangesView) return;
                 activeTab = 'changes';
               }}
-              disabled={!canUseWorktreeViews}
+              disabled={!canUseChangesView}
               data-testid="tab-changes"
               class="relative flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors {activeTab ===
               'changes'
@@ -2518,7 +2564,7 @@
                 : 'text-[var(--sg-text-dim)] hover:text-[var(--sg-text)]'} disabled:cursor-not-allowed disabled:opacity-50"
             >
               Changes
-              {#if worktreeStatus.length > 0}
+              {#if canUseChangesView && worktreeStatus.length > 0}
                 <span
                   class="rounded-full bg-[var(--sg-warning)]/20 px-1.5 py-0.5 text-[9px] font-bold text-[var(--sg-warning)]"
                 >
@@ -2948,7 +2994,7 @@
               {/if}
             </div>
           </div>
-        {:else if activeTab === 'history' || !selectedWorktree || activeIsRoot}
+        {:else if activeTab === 'history'}
           <!-- Commit graph -->
           <div class="flex min-h-0 {selectedCommits.length > 0 ? 'h-1/2' : 'flex-1'} flex-col">
             <div
@@ -3059,9 +3105,11 @@
               cwd={wtPath}
               launchRequests={hookTerminalLaunchRequests}
               forcedLayout={shouldLockHookTerminals ? 'grid' : null}
-              interactionLocked={Boolean(runningHooksByCwd[wtPath])}
-              lockReason={activeHookName
-                ? `Running ${activeHookName} (input locked)`
+              interactionLocked={Boolean(operationStatus) || Boolean(runningHooksByCwd[wtPath])}
+              lockReason={operationStatus
+                ? activeHookName
+                  ? `Running ${activeHookName} (input locked)`
+                  : 'Operation in progress (input locked)'
                 : 'Hook run in progress (input locked)'}
             />
           </div>
@@ -3211,10 +3259,7 @@
         </button>
       </div>
       <form
-        onsubmit={async e => {
-          await createFirstWorktree(e);
-          if (!error) createModalOpen = false;
-        }}
+        onsubmit={createFirstWorktree}
         class="px-4 py-3"
       >
         <p

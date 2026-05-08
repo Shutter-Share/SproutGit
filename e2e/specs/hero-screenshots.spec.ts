@@ -2,13 +2,7 @@ import { dirname, join } from 'node:path';
 
 import { test } from '../fixtures';
 import { createHeroMediaRepo } from '../helpers/benchmark-repos';
-import {
-  appendRepoFile,
-  executeSqlite,
-  resetConfigDb,
-  resetTestDirs,
-  writeRepoFile,
-} from '../helpers/fixtures';
+import { appendRepoFile, executeSqlite, writeRepoFile } from '../helpers/fixtures';
 import { captureScreenshotVariants, resizeWindowForScreenshot } from '../helpers/screenshots';
 import {
   createWorktreeViaUi,
@@ -16,7 +10,6 @@ import {
   importRepoViaUi,
   openChangesTab,
   openHistoryTab,
-  reloadToHome,
 } from '../helpers/ui';
 
 function sqlStr(value: string) {
@@ -60,12 +53,6 @@ test.describe('Hero screenshots @screenshots', () => {
     !process.env.CAPTURE_SCREENSHOTS,
     'Set CAPTURE_SCREENSHOTS=1 to generate curated screenshots'
   );
-
-  test.beforeEach(async ({ tauriPage }) => {
-    resetConfigDb();
-    await reloadToHome(tauriPage);
-    resetTestDirs();
-  });
 
   test('captures canonical UI screenshots from the pinned hero repo', async ({
     tauriPage,

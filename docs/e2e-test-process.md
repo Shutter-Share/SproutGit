@@ -17,13 +17,15 @@ To skip the one-time prebuild for faster local iteration:
 
 ## Per-Test Isolation
 
-Each E2E spec should reset state in `beforeEach` with existing helpers:
+The `tauriPage` fixture owns per-test reset before the app launches:
 
 1. Reset isolated config DB path for the run.
-2. Return to home screen with stable UI helpers.
-3. Reset workspace test directories.
+2. Reset workspace test directories.
+3. Start a fresh Tauri app process for the test.
 
-The `reloadToHome()` helper in `e2e/helpers/ui.ts` is the source of truth for the in-app reset path. It clears `sg_workspace_hint` from session storage _before_ navigating to home (so the home page never auto-navigates back to the previous workspace), then uses UI-driven navigation via `ensureHome()`. A full `window.location.reload()` is intentionally avoided — SvelteKit route navigation already tears down and remounts all page components, and hard reloads take 20–45 s on slow Windows CI runners.
+This ordering is required on Windows. Resetting the config DB or workspace directories after the app is already running can race startup reads, file watchers, and terminal child processes, producing `database is locked`, `EBUSY`, and `beforeEach` timeout flakes.
+
+Specs should assume a fresh app on first interaction and should not perform their own reset in `beforeEach` unless a test explicitly needs an in-app navigation step within the same process.
 
 ## Browser Dependency Setup
 

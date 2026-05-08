@@ -66,6 +66,35 @@ fn match_git_index_to_worktree(
     }
 }
 
+/// Returns `true` if the path inside `.git/` signals that branches or HEAD state changed.
+///
+/// Matches (relative to `git_dir`):
+///   `HEAD`                          → checkout in the main worktree
+///   `COMMIT_EDITMSG`                → any commit was just created
+///   `packed-refs`                   → refs were repacked (push/fetch/gc)
+///   `refs/**`                       → any ref update (branch advance, new tag, etc.)
+///   `worktrees/<name>/HEAD`         → checkout in a linked worktree
+fn is_git_refs_change(event_path: &Path, git_dir: &Path) -> bool {
+    let rel = match event_path.strip_prefix(git_dir) {
+        Ok(r) => r,
+        Err(_) => return false,
+    };
+    let comps: Vec<_> = rel.components().collect();
+    match comps.as_slice() {
+        [c] if c.as_os_str() == OsStr::new("HEAD") => true,
+        [c] if c.as_os_str() == OsStr::new("COMMIT_EDITMSG") => true,
+        [c] if c.as_os_str() == OsStr::new("packed-refs") => true,
+        [c, ..] if c.as_os_str() == OsStr::new("refs") => true,
+        [a, _, c]
+            if a.as_os_str() == OsStr::new("worktrees")
+                && c.as_os_str() == OsStr::new("HEAD") =>
+        {
+            true
+        },
+        _ => false,
+    }
+}
+
 /// Returns `true` if `path` matches a gitignore rule inside `worktree_path`.
 /// Uses `git check-ignore -q -- <path>` (exit 0 = ignored, 1 = not ignored).
 /// Falls back to `false` (treat as real change) on any error so that a git
@@ -156,10 +185,11 @@ pub async fn start_watching_worktrees(
             };
 
             let mut affected: HashSet<String> = HashSet::new();
+            let mut refs_changed = false;
             for event in &events {
                 let event_path = &event.path;
 
-                // ── Git index changes (external staging) ──
+                // ── Git index / refs changes ──
                 if let Some(ref git_dir) = git_dir_for_closure {
                     let git_dir_path = Path::new(git_dir);
                     if event_path.starts_with(git_dir_path) {
@@ -174,6 +204,10 @@ pub async fn start_watching_worktrees(
                             if Path::new(&wt).is_dir() {
                                 affected.insert(wt);
                             }
+                        } else if is_git_refs_change(event_path, git_dir_path) {
+                            // A branch ref, HEAD, or commit marker changed — the graph
+                            // and worktree list may be stale (e.g. terminal commit/checkout).
+                            refs_changed = true;
                         }
                         // Skip further processing for all .git dir events regardless.
                         continue;
@@ -198,6 +232,9 @@ pub async fn start_watching_worktrees(
 
             for wt_path in affected {
                 let _ = app.emit("worktree-changed", &wt_path);
+            }
+            if refs_changed {
+                let _ = app.emit("git-refs-changed", ());
             }
         },
     )
@@ -238,4 +275,60 @@ pub async fn stop_watching_worktrees(state: State<'_, WatcherState>) -> Result<(
         .map_err(|_| "Watcher state lock poisoned".to_string())?;
     *guard = None;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_git_refs_change;
+    use std::path::Path;
+
+    fn git(extra: &str) -> std::path::PathBuf {
+        Path::new("/repo/.git").join(extra)
+    }
+    const GIT_DIR: &str = "/repo/.git";
+
+    #[test]
+    fn matches_head() {
+        assert!(is_git_refs_change(&git("HEAD"), Path::new(GIT_DIR)));
+    }
+
+    #[test]
+    fn matches_commit_editmsg() {
+        assert!(is_git_refs_change(&git("COMMIT_EDITMSG"), Path::new(GIT_DIR)));
+    }
+
+    #[test]
+    fn matches_packed_refs() {
+        assert!(is_git_refs_change(&git("packed-refs"), Path::new(GIT_DIR)));
+    }
+
+    #[test]
+    fn matches_refs_prefix() {
+        assert!(is_git_refs_change(&git("refs/heads/main"), Path::new(GIT_DIR)));
+        assert!(is_git_refs_change(&git("refs/remotes/origin/main"), Path::new(GIT_DIR)));
+        assert!(is_git_refs_change(&git("refs/tags/v1.0"), Path::new(GIT_DIR)));
+    }
+
+    #[test]
+    fn matches_worktree_head() {
+        assert!(is_git_refs_change(
+            &git("worktrees/feature-foo/HEAD"),
+            Path::new(GIT_DIR)
+        ));
+    }
+
+    #[test]
+    fn does_not_match_index() {
+        assert!(!is_git_refs_change(&git("index"), Path::new(GIT_DIR)));
+        assert!(!is_git_refs_change(&git("ORIG_HEAD"), Path::new(GIT_DIR)));
+        assert!(!is_git_refs_change(&git("worktrees/feature-foo/index"), Path::new(GIT_DIR)));
+    }
+
+    #[test]
+    fn does_not_match_outside_git_dir() {
+        assert!(!is_git_refs_change(
+            Path::new("/repo/some-file.rs"),
+            Path::new(GIT_DIR)
+        ));
+    }
 }
