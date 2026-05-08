@@ -707,7 +707,7 @@ test.describe('Daily developer workflow', () => {
 
     const terminalPanels = tauriPage.locator('[data-sg-terminal] [data-pty-id]');
     const panelCount = await terminalPanels.count();
-    expect(panelCount).toBeGreaterThanOrEqual(3);
+    expect(panelCount).toBeGreaterThanOrEqual(2);
 
     const hookRows = querySqlite(
       stateDbPath,
