@@ -437,7 +437,8 @@ pub async fn list_refs(repo_path: String) -> Result<RefsResult, String> {
                 "tag"
             };
 
-                    // Capture origin/HEAD target before filtering it out
+                    // Skip origin/HEAD (symbolic ref pointing to default branch);
+                    // the default branch is discovered separately below via symbolic-ref.
             if kind == "remote" && short_name.ends_with("/HEAD") {
                 return None;
             }

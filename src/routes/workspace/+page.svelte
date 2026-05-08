@@ -63,6 +63,7 @@
   import { tildify } from '$lib/paths.svelte';
   import { findPath, normalizePathSeparators, pathStartsWith, pathsEqual } from '$lib/path-utils';
   import { validateBranchName, validateSourceRef } from '$lib/validation';
+  import { makeCompareRefsForCreate, preferredSourceRef } from '$lib/ref-utils';
   import { openPath } from '@tauri-apps/plugin-opener';
   import {
     FolderOpen,
@@ -718,32 +719,7 @@
     Boolean(selectedWorktree && !pathsEqual(selectedWorktree.path, workspace?.rootPath))
   );
 
-  function compareRefsForCreate(a: RefInfo, b: RefInfo): number {
-    const rank = (ref: RefInfo): number => {
-      // The detected default branch (e.g. origin/main) gets highest priority.
-      if (defaultRemoteBranch && ref.name === defaultRemoteBranch) return 0;
-      if (ref.kind === 'remote' && ref.name.startsWith('upstream/')) return 1;
-      if (ref.kind === 'remote' && ref.name.startsWith('origin/')) return 2;
-      if (ref.kind === 'remote') return 3;
-      if (ref.kind === 'branch') return 4;
-      return 5;
-    };
-
-    const rankDiff = rank(a) - rank(b);
-    if (rankDiff !== 0) return rankDiff;
-    return a.name.localeCompare(b.name);
-  }
-
-  function preferredSourceRef(refList: RefInfo[]): string {
-    // If the default remote branch is known and present in the ref list, use it directly.
-    if (defaultRemoteBranch) {
-      const defaultRef = refList.find(r => r.name === defaultRemoteBranch);
-      if (defaultRef) return defaultRef.name;
-    }
-    const sorted = [...refList].sort(compareRefsForCreate);
-    const preferred = sorted.find(ref => ref.kind === 'remote') ?? sorted[0];
-    return preferred?.name ?? 'HEAD';
-  }
+  const compareRefsForCreate = $derived(makeCompareRefsForCreate(defaultRemoteBranch));
 
   const sortedRefsForCreate = $derived([...refs].sort(compareRefsForCreate));
   const refItems = $derived(
@@ -1241,7 +1217,7 @@
       refs = refsData.refs;
       defaultRemoteBranch = refsData.defaultRemoteBranch;
       initializeGraphState(graphData);
-      selectedRef = preferredSourceRef(refsData.refs);
+      selectedRef = preferredSourceRef(refsData.refs, refsData.defaultRemoteBranch);
 
       if (graphHasMore) {
         // Fetch total commit count in the background only when the first page is partial.
@@ -1380,13 +1356,25 @@
   const unlistenHookProgress = onHookProgress(handleHookProgress);
   const unlistenHookTerminalLaunch = onHookTerminalLaunch(handleHookTerminalLaunch);
   // When git refs change externally (e.g. terminal commits/checkouts), refresh
+  // Debounce rapid ref-change events (e.g. fetch/repack emits several in quick
+  // succession) and prevent overlapping full refreshes with an in-flight guard.
+  let refsChangedTimer: ReturnType<typeof setTimeout> | null = null;
+  let refsRefreshInFlight = false;
   // the graph and worktrees list so the History tab stays up to date.
   const unlistenGitRefsChanged = onGitRefsChanged(() => {
-    if (!committing && !stagingAction) {
-      void refreshWorkspaceData();
-    }
+    if (committing || stagingAction) return;
+    if (refsChangedTimer !== null) clearTimeout(refsChangedTimer);
+    refsChangedTimer = setTimeout(() => {
+      refsChangedTimer = null;
+      if (refsRefreshInFlight) return;
+      refsRefreshInFlight = true;
+      void refreshWorkspaceData().finally(() => {
+        refsRefreshInFlight = false;
+      });
+    }, 300);
   });
   onDestroy(() => {
+    if (refsChangedTimer !== null) clearTimeout(refsChangedTimer);
     void unlistenHookProgress.then(unlisten => unlisten());
     void unlistenHookTerminalLaunch.then(unlisten => unlisten());
     void unlistenGitRefsChanged.then(unlisten => unlisten());
@@ -2264,7 +2252,7 @@
             <button
               type="button"
               onclick={() => {
-                selectedRef = preferredSourceRef(refs);
+                selectedRef = preferredSourceRef(refs, defaultRemoteBranch);
                 createModalOpen = true;
                 formTouched = { branch: false, ref: false };
               }}

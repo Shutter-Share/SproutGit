@@ -623,9 +623,10 @@ test.describe('Daily developer workflow', () => {
     expect(await terminalTab.getAttribute('disabled')).toBeNull();
 
     await historyTab.click();
-    await tauriPage.evaluate(`(() => {
+    const hasCommitGraph = await tauriPage.evaluate(`(() => {
       return (document.body?.textContent ?? '').includes('Commit graph');
     })()`);
+    expect(hasCommitGraph).toBe(true);
 
     await terminalTab.click();
 

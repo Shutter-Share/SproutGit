@@ -71,11 +71,14 @@
       r => r.cwd === cwd && !processedLaunchIds.has(r.id)
     );
     const hasPendingLaunch = pendingForThisCwd.length > 0;
-    if (!_autoSpawned && defaultShell && !hasPendingLaunch) {
+    if (!_autoSpawned && defaultShell) {
       _autoSpawned = true;
-      // If a hook launch request is already queued at mount time, skip the blank
-      // default session — the launchRequest effect below will add the correct one.
-      if (!launchRequest) {
+      // Only spawn the blank default session when no hook launch is pending for
+      // this container's cwd. If a launch is pending, the launchRequests effect
+      // below will add the hook session instead. We still set _autoSpawned so
+      // that once the launch request is consumed (and hasPendingLaunch flips back
+      // to false), this block does not fire again and add a spurious blank session.
+      if (!hasPendingLaunch) {
         addSession(defaultShell);
       }
     }
