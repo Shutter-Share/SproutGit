@@ -117,12 +117,34 @@ export const test = base.extend<Fixtures>({
       // taskkill block below is skipped, making this the only cleanup path.
       if (tauriPage) {
         try {
-          await tauriPage.evaluate(
-            `window.__TAURI_INTERNALS__?.invoke?.('close_all_terminals').catch(() => {})`
-          );
-          await tauriPage.evaluate(
-            `window.__TAURI_INTERNALS__?.invoke?.('stop_watching_worktrees').catch(() => {})`
-          );
+          await tauriPage.evaluate(`
+            (async () => {
+              const invoke = window.__TAURI_INTERNALS__?.invoke;
+              if (typeof invoke !== 'function') {
+                return;
+              }
+
+              try {
+                await invoke('close_all_terminals');
+              } catch {
+                // Ignore teardown errors for best-effort cleanup.
+              }
+            })()
+          `);
+          await tauriPage.evaluate(`
+            (async () => {
+              const invoke = window.__TAURI_INTERNALS__?.invoke;
+              if (typeof invoke !== 'function') {
+                return;
+              }
+
+              try {
+                await invoke('stop_watching_worktrees');
+              } catch {
+                // Ignore teardown errors for best-effort cleanup.
+              }
+            })()
+          `);
           // Give the OS a moment to release file handles after PTY termination.
           await new Promise((resolve) => setTimeout(resolve, 500));
         } catch {
