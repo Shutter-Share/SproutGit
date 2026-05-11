@@ -36,11 +36,19 @@ function isMissingMainWindowError(error: unknown): boolean {
   return error instanceof Error && error.message.includes("window 'main' not found");
 }
 
+function isAdapterTimeoutError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.message.includes('TauriPage command') &&
+    error.message.includes('failed: timeout')
+  );
+}
+
 async function safeIsVisible(tauriPage: AdapterPage, selector: string) {
   try {
     return await tauriPage.isVisible(selector);
   } catch (error) {
-    if (isMissingMainWindowError(error)) {
+    if (isMissingMainWindowError(error) || isAdapterTimeoutError(error)) {
       return false;
     }
     throw error;
@@ -350,8 +358,16 @@ export async function deleteWorktreeViaUi(tauriPage: AdapterPage, branchName: st
  * switched to the Changes tab and the worktree has at least one unstaged file visible.
  */
 export async function stageAndCommitViaUi(tauriPage: AdapterPage, message: string) {
-  await tauriPage.getByTestId('btn-stage-all').waitFor(DEFAULT_UI_TIMEOUT);
-  await tauriPage.getByTestId('btn-stage-all').click();
+  const stageAllButton = tauriPage.getByTestId('btn-stage-all');
+  await stageAllButton.waitFor(DEFAULT_UI_TIMEOUT);
+  const stageButtonEnableDeadline = Date.now() + DEFAULT_UI_TIMEOUT;
+  while (Date.now() < stageButtonEnableDeadline) {
+    if ((await stageAllButton.getAttribute('disabled')) === null) {
+      break;
+    }
+    await delay(120);
+  }
+  await stageAllButton.click();
 
   // Wait for staging to start reflecting in the UI.
   // stage_files is an async Rust invoke, but the commit button enablement below is the real
