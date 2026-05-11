@@ -68,6 +68,7 @@ export const test = base.extend<Fixtures>({
 
     let processManager: TauriProcessManager | null = null;
     let client: PluginClient | null = null;
+    let tauriPage: TauriPage | null = null;
 
     try {
       if (TAURI_COMMAND) {
@@ -102,9 +103,33 @@ export const test = base.extend<Fixtures>({
         throw new Error('Plugin ping failed');
       }
 
-      const tauriPage = new TauriPage(client);
+      tauriPage = new TauriPage(client);
       await use(tauriPage);
     } finally {
+      // Kill all PTY terminal sessions and stop the file watcher before
+      // disconnecting. On Windows, PowerShell processes hold directory handles
+      // on their CWD (worktree paths). If these processes are still alive when
+      // the next test's resetTestDirs() runs, rmSync will fail with EBUSY.
+      //
+      // This must happen regardless of whether processManager is set (i.e. it
+      // applies to both the spawned-process mode and the shared pre-built app
+      // mode used in CI). In shared-app mode processManager is null so the
+      // taskkill block below is skipped, making this the only cleanup path.
+      if (tauriPage) {
+        try {
+          await tauriPage.evaluate(
+            `window.__TAURI_INTERNALS__?.invoke?.('close_all_terminals').catch(() => {})`
+          );
+          await tauriPage.evaluate(
+            `window.__TAURI_INTERNALS__?.invoke?.('stop_watching_worktrees').catch(() => {})`
+          );
+          // Give the OS a moment to release file handles after PTY termination.
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        } catch {
+          // Ignore teardown errors — the app may already be in a bad state.
+        }
+      }
+
       client?.disconnect();
 
       // On Windows, processManager.stop() calls TerminateProcess() on the Tauri
