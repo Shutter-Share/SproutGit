@@ -131,6 +131,9 @@ export type WorkspaceHook = {
   script: string;
   enabled: boolean;
   critical: boolean;
+  switchOncePerSession: boolean;
+  switchRunOnCreate: boolean;
+  switchRunOnDelete: boolean;
   keepOpenOnCompletion: boolean;
   timeoutSeconds: number;
   createdAt: number;
@@ -147,10 +150,15 @@ export type HookUpsertInput = {
   script: string;
   enabled: boolean;
   critical: boolean;
+  switchOncePerSession: boolean;
+  switchRunOnCreate: boolean;
+  switchRunOnDelete: boolean;
   keepOpenOnCompletion: boolean;
   timeoutSeconds: number;
   dependencyIds: string[];
 };
+
+export type WorktreeSwitchHookSource = 'manual' | 'create' | 'delete' | 'load';
 
 export type CheckoutResult = {
   worktreePath: string;
@@ -213,6 +221,7 @@ export type HookTerminalLaunchEvent = {
   shell: WorkspaceHookShell;
   cwd: string;
   command: string;
+  envVars: Record<string, string>;
   keepOpenOnCompletion: boolean;
 };
 
@@ -437,6 +446,19 @@ export const runWorkspaceHook = (
     initiatingWorktreePath: initiatingWorktreePath?.trim() ? initiatingWorktreePath : null,
   });
 
+export const runWorktreeSwitchHooks = (
+  workspacePath: string,
+  targetWorktreePath: string,
+  initiatingWorktreePath?: string | null,
+  source: WorktreeSwitchHookSource = 'manual'
+) =>
+  invoke<void>('run_worktree_switch_hooks', {
+    workspacePath,
+    targetWorktreePath,
+    initiatingWorktreePath: initiatingWorktreePath?.trim() ? initiatingWorktreePath : null,
+    source,
+  });
+
 export const listWorktreeProvenance = (workspacePath: string) =>
   invoke<WorktreeProvenance[]>('list_worktree_provenance', { workspacePath });
 
@@ -598,7 +620,8 @@ export const spawnTerminal = (
   cols: number,
   rows: number,
   command?: string | null,
-  hookId?: string | null
+  hookId?: string | null,
+  envVars?: Record<string, string> | null
 ) =>
   invoke<string>('spawn_terminal', {
     shell,
@@ -607,6 +630,7 @@ export const spawnTerminal = (
     rows,
     command: command ?? null,
     hookId: hookId ?? null,
+    envVars: envVars ?? null,
   });
 
 /**
@@ -629,6 +653,9 @@ export const terminalResize = (ptyId: string, cols: number, rows: number) =>
 export const closeTerminal = (ptyId: string) => invoke<void>('close_terminal', { ptyId });
 
 export const closeAllTerminals = () => invoke<void>('close_all_terminals');
+
+export const closeTerminalsForPath = (path: string) =>
+  invoke<void>('close_terminals_for_path', { path });
 
 export const onTerminalOutput = (
   ptyId: string,

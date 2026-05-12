@@ -343,6 +343,9 @@
     script: defaultScript(),
     enabled: true,
     critical: false,
+    switchOncePerSession: false,
+    switchRunOnCreate: true,
+    switchRunOnDelete: false,
     keepOpenOnCompletion: false,
     timeoutSeconds: 600,
     dependencyIds: [],
@@ -406,6 +409,9 @@
       script: defaultScript(),
       enabled: true,
       critical: false,
+      switchOncePerSession: false,
+      switchRunOnCreate: true,
+      switchRunOnDelete: false,
       keepOpenOnCompletion: false,
       timeoutSeconds: 600,
       dependencyIds: [],
@@ -447,6 +453,9 @@
       script: hook.script,
       enabled: hook.enabled,
       critical: hook.critical,
+      switchOncePerSession: hook.switchOncePerSession,
+      switchRunOnCreate: hook.switchRunOnCreate,
+      switchRunOnDelete: hook.switchRunOnDelete,
       keepOpenOnCompletion: hook.keepOpenOnCompletion,
       timeoutSeconds: hook.timeoutSeconds,
       dependencyIds: [...hook.dependencyIds],
@@ -532,6 +541,18 @@
   );
 
   $effect(() => {
+    const allowedIds = new Set(dependencyCandidates.map(hook => hook.id));
+    const normalized = form.dependencyIds.filter(id => allowedIds.has(id));
+
+    if (normalized.length !== form.dependencyIds.length) {
+      form = {
+        ...form,
+        dependencyIds: normalized,
+      };
+    }
+  });
+
+  $effect(() => {
     const targetOptions = executionTargetOptions(form.trigger);
     if (!targetOptions.some(option => option.value === form.executionTarget)) {
       const nextExecutionTarget = targetOptions[0]?.value ?? 'trigger_worktree';
@@ -546,6 +567,20 @@
     const normalizedScope = normalizeScopeForTarget(form.executionTarget);
     if (form.scope !== normalizedScope) {
       form = { ...form, scope: normalizedScope };
+    }
+
+    const supportsSwitchOnce =
+      form.trigger === 'before_worktree_switch' || form.trigger === 'after_worktree_switch';
+    if (
+      !supportsSwitchOnce &&
+      (form.switchOncePerSession || !form.switchRunOnCreate || form.switchRunOnDelete)
+    ) {
+      form = {
+        ...form,
+        switchOncePerSession: false,
+        switchRunOnCreate: true,
+        switchRunOnDelete: false,
+      };
     }
   });
 
@@ -692,6 +727,26 @@
                                 class="rounded border border-[var(--sg-danger)]/30 bg-[var(--sg-danger)]/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--sg-danger)]"
                                 >Critical</span
                               >
+                            {/if}
+                            {#if row.hook.switchOncePerSession}
+                              <span
+                                class="rounded border border-[var(--sg-primary)]/30 bg-[var(--sg-primary)]/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--sg-primary)]"
+                                >First switch only</span
+                              >
+                            {/if}
+                            {#if row.hook.trigger === 'before_worktree_switch' || row.hook.trigger === 'after_worktree_switch'}
+                              {#if row.hook.switchRunOnCreate}
+                                <span
+                                  class="rounded border border-[var(--sg-accent)]/30 bg-[var(--sg-accent)]/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--sg-accent)]"
+                                  >On create</span
+                                >
+                              {/if}
+                              {#if row.hook.switchRunOnDelete}
+                                <span
+                                  class="rounded border border-[var(--sg-warning)]/30 bg-[var(--sg-warning)]/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--sg-warning)]"
+                                  >On delete</span
+                                >
+                              {/if}
                             {/if}
                             {#if row.hook.keepOpenOnCompletion}
                               <span
@@ -1040,6 +1095,122 @@
                   </Checkbox>
                 </div>
               </div>
+
+              {#if form.trigger === 'before_worktree_switch' || form.trigger === 'after_worktree_switch'}
+                <div
+                  class="cursor-pointer rounded border border-[var(--sg-border)] bg-[var(--sg-surface)] p-2.5"
+                  role="button"
+                  tabindex="0"
+                  onclick={e => {
+                    const input = (e.currentTarget as HTMLElement).querySelector(
+                      'input[type="checkbox"]'
+                    );
+                    if (input) (input as HTMLInputElement).click();
+                  }}
+                  onkeydown={e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      const input = (e.currentTarget as HTMLElement).querySelector(
+                        'input[type="checkbox"]'
+                      );
+                      if (input) (input as HTMLInputElement).click();
+                    }
+                  }}
+                >
+                  <div class="pointer-events-none">
+                    <Checkbox
+                      checked={form.switchOncePerSession}
+                      onChange={next => {
+                        form = { ...form, switchOncePerSession: next };
+                      }}
+                    >
+                      <span>
+                        <span class="block text-xs text-[var(--sg-text)]"
+                          >First switch each session</span
+                        >
+                        <span class="block text-[10px] text-[var(--sg-text-faint)]"
+                          >Run this switch hook only the first time each worktree is selected in
+                          the current app session.</span
+                        >
+                      </span>
+                    </Checkbox>
+                  </div>
+                </div>
+
+                <div
+                  class="cursor-pointer rounded border border-[var(--sg-border)] bg-[var(--sg-surface)] p-2.5"
+                  role="button"
+                  tabindex="0"
+                  onclick={e => {
+                    const input = (e.currentTarget as HTMLElement).querySelector(
+                      'input[type="checkbox"]'
+                    );
+                    if (input) (input as HTMLInputElement).click();
+                  }}
+                  onkeydown={e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      const input = (e.currentTarget as HTMLElement).querySelector(
+                        'input[type="checkbox"]'
+                      );
+                      if (input) (input as HTMLInputElement).click();
+                    }
+                  }}
+                >
+                  <div class="pointer-events-none">
+                    <Checkbox
+                      checked={form.switchRunOnCreate}
+                      onChange={next => {
+                        form = { ...form, switchRunOnCreate: next };
+                      }}
+                    >
+                      <span>
+                        <span class="block text-xs text-[var(--sg-text)]">Run on create auto-switch</span>
+                        <span class="block text-[10px] text-[var(--sg-text-faint)]"
+                          >Run during auto-activation after creating a new worktree.</span
+                        >
+                      </span>
+                    </Checkbox>
+                  </div>
+                </div>
+
+                <div
+                  class="cursor-pointer rounded border border-[var(--sg-border)] bg-[var(--sg-surface)] p-2.5"
+                  role="button"
+                  tabindex="0"
+                  onclick={e => {
+                    const input = (e.currentTarget as HTMLElement).querySelector(
+                      'input[type="checkbox"]'
+                    );
+                    if (input) (input as HTMLInputElement).click();
+                  }}
+                  onkeydown={e => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      const input = (e.currentTarget as HTMLElement).querySelector(
+                        'input[type="checkbox"]'
+                      );
+                      if (input) (input as HTMLInputElement).click();
+                    }
+                  }}
+                >
+                  <div class="pointer-events-none">
+                    <Checkbox
+                      checked={form.switchRunOnDelete}
+                      onChange={next => {
+                        form = { ...form, switchRunOnDelete: next };
+                      }}
+                    >
+                      <span>
+                        <span class="block text-xs text-[var(--sg-text)]">Run on delete auto-switch</span>
+                        <span class="block text-[10px] text-[var(--sg-text-faint)]"
+                          >Run before deleting the active worktree when SproutGit auto-switches away.</span
+                        >
+                      </span>
+                    </Checkbox>
+                  </div>
+                </div>
+              {/if}
             </div>
           </section>
 

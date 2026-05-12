@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, tick } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import Autocomplete from '$lib/components/Autocomplete.svelte';
@@ -10,6 +10,7 @@
   import Select from '$lib/components/Select.svelte';
   import Spinner from '$lib/components/Spinner.svelte';
   import TerminalContainer from '$lib/components/TerminalContainer.svelte';
+  import { clearTerminalContainerCache } from '$lib/terminal-session-cache.svelte';
   import WorkspaceHooksModal from '$lib/components/WorkspaceHooksModal.svelte';
   import ResizableSidebar from '$lib/components/ResizableSidebar.svelte';
   import {
@@ -29,6 +30,7 @@
     onHookTerminalLaunch,
     onGitOpProgress,
     resetWorktreeBranch,
+    runWorktreeSwitchHooks,
     runWorkspaceHook,
     getWorktreeStatus,
     getWorkingDiff,
@@ -41,7 +43,7 @@
     createCommit,
     startWatchingWorktrees,
     stopWatchingWorktrees,
-    closeAllTerminals,
+    closeTerminalsForPath,
     onWorktreeChanged,
     onGitRefsChanged,
     getAppSetting,
@@ -64,7 +66,7 @@
   import { findPath, normalizePathSeparators, pathStartsWith, pathsEqual } from '$lib/path-utils';
   import { validateBranchName, validateSourceRef } from '$lib/validation';
   import { makeCompareRefsForCreate, preferredSourceRef } from '$lib/ref-utils';
-  import { openPath } from '@tauri-apps/plugin-opener';
+  import { revealItemInDir } from '@tauri-apps/plugin-opener';
   import {
     FolderOpen,
     Play,
@@ -137,6 +139,7 @@
   let worktreeContextMenu = $state<{ x: number; y: number; items: MenuItem[] } | null>(null);
   let hooksModalOpen = $state(false);
   let createModalOpen = $state(false);
+  let newBranchInputEl: HTMLInputElement | null = null;
   let operationStatus = $state<{ title: string; detail: string } | null>(null);
   let operationError = $state<string | null>(null);
   let activeHookName = $state<string | null>(null);
@@ -168,8 +171,17 @@
   let hookTerminalRuns = $state<HookTerminalRun[]>([]);
 
   const shouldKeepOperationOpen = $derived(operationHooks.some(hook => hook.keepOpenOnCompletion));
-  const runningHookTerminalCount = $derived(hookTerminalRuns.filter(run => run.running).length);
-  const shouldLockHookTerminals = $derived(runningHookTerminalCount > 0);
+  let createOperationPath = $state<string | null>(null);
+  let pendingCreationBranch = $state<string | null>(null);
+  let createHookTerminalLaunchDetected = $state(false);
+  let deferredChangesPath = $state<string | null>(null);
+
+  $effect(() => {
+    if (!createModalOpen) return;
+    void tick().then(() => {
+      newBranchInputEl?.focus();
+    });
+  });
 
   const runningHooksByCwd = $derived.by(() => {
     const counts: Record<string, number> = {};
@@ -179,24 +191,6 @@
     }
     return counts;
   });
-
-  const hookStatusSummary = $derived.by(() => {
-    const summary = {
-      pending: 0,
-      running: 0,
-      success: 0,
-      skipped: 0,
-      timed_out: 0,
-      error: 0,
-    };
-
-    for (const hook of operationHooks) {
-      summary[hook.status] += 1;
-    }
-
-    return summary;
-  });
-  const lastOperationLog = $derived(operationLogs.at(-1) ?? null);
 
   function mapEventStatus(event: HookProgressEvent): OperationHookStatus {
     if (event.phase === 'start') return 'running';
@@ -662,8 +656,24 @@
     policyHint: string;
   };
 
+  // Sentinel path used for the placeholder row shown while a new worktree is being created.
+  const PENDING_CREATION_PATH = '__pending_creation__';
+
   const inventoryWorktrees = $derived.by(() => {
     const rows: InventoryEntry[] = [];
+
+    // Inject a placeholder row for the branch being created so the spinner
+    // appears on the new entry rather than on the currently active worktree.
+    if (creating && pendingCreationBranch && !taskWorktrees.some(wt => wt.branch === pendingCreationBranch)) {
+      rows.push({
+        wt: { path: PENDING_CREATION_PATH, branch: pendingCreationBranch, head: null, detached: false },
+        section: 'managed',
+        typeLabel: 'Managed',
+        ownership: 'Owned branch',
+        policyHint: 'Creating…',
+      });
+    }
+
     for (const wt of taskWorktrees) {
       rows.push({
         wt,
@@ -776,6 +786,7 @@
     shell: string;
     label: string;
     command: string;
+    envVars: Record<string, string>;
     keepOpenOnCompletion: boolean;
     hookId: string;
   };
@@ -785,19 +796,41 @@
   // so the PTY session survives tab switches and worktree switches.
   let terminalInitializedPaths = $state(new Set<string>());
 
+  function clearTerminalStateForPath(path: string) {
+    const normalizedPath = normalizePathSeparators(path);
+    terminalInitializedPaths = new Set(
+      [...terminalInitializedPaths].filter(existing => !pathsEqual(existing, normalizedPath))
+    );
+    hookTerminalLaunchRequests = hookTerminalLaunchRequests.filter(
+      request => !pathsEqual(request.cwd, normalizedPath)
+    );
+    hookTerminalRuns = hookTerminalRuns.filter(run => !pathsEqual(run.cwd, normalizedPath));
+
+    if (activeTerminalPath && pathsEqual(activeTerminalPath, normalizedPath)) {
+      activeTerminalPath = activeWorktreePath ?? workspace?.workspacePath ?? null;
+    }
+
+    // Evict the session cache so a worktree recreated at the same path
+    // starts with a fresh terminal instead of restoring the deleted session.
+    clearTerminalContainerCache(normalizedPath);
+  }
+
   // Lazily initialize terminal for the active worktree the first time the tab is shown.
+  // Uses pathsEqual rather than Set.has so that paths which differ only in case (Windows)
+  // or separator style are not treated as distinct paths, which would mount a second
+  // TerminalContainer with no pending launch requests and trigger an unwanted auto-spawn.
   $effect(() => {
     if (
       activeTab === 'terminal' &&
       defaultShell &&
       activeTerminalPath &&
-      !terminalInitializedPaths.has(activeTerminalPath)
+      ![...terminalInitializedPaths].some(p => pathsEqual(p, activeTerminalPath))
     ) {
       terminalInitializedPaths = new Set([...terminalInitializedPaths, activeTerminalPath]);
     }
   });
 
-  const canUseChangesView = $derived(hasManagedWorktreeSelection);
+  const canUseChangesView = $derived(hasManagedWorktreeSelection && !creating);
 
   // Per-worktree change counts for sidebar badges
   let worktreeChangeCounts = $state<Record<string, number>>({});
@@ -844,6 +877,9 @@
   async function loadAllWorktreeChangeCounts(paths: string[]) {
     const results = await Promise.all(
       paths.map(async p => {
+        if (creating && deferredChangesPath && pathsEqual(p, deferredChangesPath)) {
+          return [p, worktreeChangeCounts[p] ?? 0] as [string, number];
+        }
         try {
           const r = await getWorktreeStatus(p);
           return [p, r.files.length] as [string, number];
@@ -891,6 +927,12 @@
       stagingDiffContent = '';
       return;
     }
+    if (creating && deferredChangesPath && pathsEqual(selectedWorktree.path, deferredChangesPath)) {
+      worktreeStatus = [];
+      stagingDiffFile = null;
+      stagingDiffContent = '';
+      return;
+    }
     statusLoading = true;
     try {
       const result = await getWorktreeStatus(selectedWorktree.path);
@@ -933,6 +975,10 @@
   }
 
   async function refreshWorktreeStatusFromWatcher(changedPath: string) {
+    if (creating && deferredChangesPath && pathsEqual(changedPath, deferredChangesPath)) {
+      return;
+    }
+
     if (deleting && pathsEqual(changedPath, deleting)) {
       return;
     }
@@ -1108,7 +1154,13 @@
       // Reset file selection whenever the active worktree changes.
       selectedFilePaths = new Set();
       lastClickedKey = null;
-      loadWorktreeStatus();
+      void loadWorktreeStatus();
+    }
+  });
+
+  $effect(() => {
+    if (activeTab === 'changes' && canUseChangesView) {
+      void loadWorktreeStatus();
     }
   });
 
@@ -1127,6 +1179,9 @@
     // listWorktrees returns forward-slash paths. Normalise separators only —
     // never lowercase, since Linux filesystems are case-sensitive.
     const changedPath = normalizePathSeparators(changedPathRaw);
+    if (creating && deferredChangesPath && pathsEqual(changedPath, deferredChangesPath)) {
+      return;
+    }
     if (deleting && pathsEqual(changedPath, deleting)) {
       return;
     }
@@ -1146,7 +1201,11 @@
 
   async function setupWatcher() {
     if (!workspace) return;
-    const allPaths = worktrees.map(wt => wt.path);
+    const allPaths = worktrees
+      .map(wt => wt.path)
+      .filter(
+        path => !(creating && deferredChangesPath && pathsEqual(path, deferredChangesPath))
+      );
     try {
       await startWatchingWorktrees(allPaths, workspace.rootPath);
       if (unlistenWorktreeChanged) unlistenWorktreeChanged();
@@ -1158,11 +1217,6 @@
 
   onDestroy(() => {
     unlistenWorktreeChanged?.();
-    // Kill all PTY sessions before unmounting. On Windows, live shell processes
-    // (PowerShell / pwsh) hold directory handles on their CWD. Killing them
-    // here ensures those handles are released before any E2E resetTestDirs()
-    // call attempts to delete the worktree directories.
-    void closeAllTerminals();
     void stopWatchingWorktrees();
   });
 
@@ -1276,6 +1330,10 @@
     if (!formValid) return;
 
     creating = true;
+    createOperationPath = null;
+    pendingCreationBranch = newBranch;
+    createHookTerminalLaunchDetected = false;
+    deferredChangesPath = null;
     error = '';
     // Close the modal immediately so the operation status banner (hook progress)
     // is visible behind the now-dismissed dialog while hooks are running.
@@ -1315,15 +1373,44 @@
       toast.success(`Worktree created: ${createdBranch}`);
 
       const normalizedCreatedPath = normalizePathSeparators(createdWorktreePath);
+      createOperationPath = normalizedCreatedPath;
+      deferredChangesPath = normalizedCreatedPath;
+      let switchedToCreatedWorktree = true;
+      try {
+        await runWorktreeSwitchHooks(
+          currentWorkspace.workspacePath,
+          normalizedCreatedPath,
+          activeWorktreePath,
+          'create'
+        );
+      } catch (switchErr) {
+        switchedToCreatedWorktree = false;
+        toast.warning(`Worktree created, but switch hooks blocked activation: ${String(switchErr)}`);
+      }
+
       try {
         await refreshWorkspaceData();
-        // Switch to the newly created worktree, falling back to first non-root.
-        activeWorktreePath =
-          findPath(worktrees, wt => wt.path, normalizedCreatedPath)?.path ??
-          worktrees.find(wt => !pathsEqual(wt.path, currentWorkspace.rootPath))?.path ??
-          worktrees[0]?.path ??
-          null;
+        if (switchedToCreatedWorktree) {
+          // Switch to the newly created worktree, falling back to first non-root.
+          activeWorktreePath =
+            findPath(worktrees, wt => wt.path, normalizedCreatedPath)?.path ??
+            worktrees.find(wt => !pathsEqual(wt.path, currentWorkspace.rootPath))?.path ??
+            worktrees[0]?.path ??
+            null;
+        } else {
+          activeWorktreePath =
+            activeWorktreePath && findPath(worktrees, wt => wt.path, activeWorktreePath)?.path
+              ? activeWorktreePath
+              : worktrees.find(wt => !pathsEqual(wt.path, currentWorkspace.rootPath))?.path ??
+                worktrees[0]?.path ??
+                null;
+        }
         activeTerminalPath = activeWorktreePath ?? currentWorkspace.workspacePath;
+        if (createHookTerminalLaunchDetected) {
+          activeTab = 'terminal';
+          activeTerminalPath =
+            findPath(worktrees, wt => wt.path, normalizedCreatedPath)?.path ?? normalizedCreatedPath;
+        }
       } catch {
         const fallbackWorktree: WorktreeInfo = {
           path: normalizedCreatedPath,
@@ -1335,8 +1422,15 @@
           ...worktrees.filter(wt => wt.path !== fallbackWorktree.path),
           fallbackWorktree,
         ];
-        activeWorktreePath = fallbackWorktree.path;
-        activeTerminalPath = fallbackWorktree.path;
+        if (switchedToCreatedWorktree) {
+          activeWorktreePath = fallbackWorktree.path;
+          activeTerminalPath = fallbackWorktree.path;
+        } else {
+          activeTerminalPath = activeWorktreePath ?? currentWorkspace.workspacePath;
+        }
+        if (createHookTerminalLaunchDetected) {
+          activeTab = 'terminal';
+        }
       }
 
       newBranch = '';
@@ -1348,10 +1442,32 @@
     } finally {
       endOperation();
       creating = false;
+      createOperationPath = null;
+      pendingCreationBranch = null;
+      deferredChangesPath = null;
+      void setupWatcher();
     }
   }
 
-  loadWorkspace();
+  loadWorkspace().then(async () => {
+    if (!workspace || !activeWorktreePath) return;
+    const targetPath = activeWorktreePath;
+    const targetWorktree = findPath(worktrees, wt => wt.path, targetPath);
+    const label = targetWorktree?.branch ?? targetPath.split('/').pop() ?? 'worktree';
+    try {
+      await beginOperation(
+        'Loading worktree',
+        `Running hooks for ${label}...`,
+        ['before_worktree_switch', 'after_worktree_switch']
+      );
+      await runWorktreeSwitchHooks(workspace.workspacePath, targetPath, null, 'load');
+    } catch (err) {
+      failOperation(String(err));
+      toast.error(String(err));
+    } finally {
+      endOperation();
+    }
+  });
 
   const unlistenHookProgress = onHookProgress(handleHookProgress);
   const unlistenHookTerminalLaunch = onHookTerminalLaunch(handleHookTerminalLaunch);
@@ -1389,8 +1505,16 @@
     const locationLabel = pathsEqual(cwd, workspace?.workspacePath)
       ? 'workspace'
       : (matchedWorktree?.branch ?? cwd.split('/').pop() ?? 'worktree');
-    const sessionLabel = `${event.hookName} (${locationLabel})`;
+    const sessionLabel = event.hookName;
     const keepOpenOnCompletion = event.keepOpenOnCompletion;
+    if (
+      creating &&
+      (event.trigger === 'before_worktree_create' || event.trigger === 'after_worktree_create')
+    ) {
+      createHookTerminalLaunchDetected = true;
+      createOperationPath = matchedWorktree?.path ?? cwd;
+      deferredChangesPath = matchedWorktree?.path ?? cwd;
+    }
 
     if (matchedWorktree) {
       activeWorktreePath = matchedWorktree.path;
@@ -1429,7 +1553,7 @@
       ];
     }
 
-    // Ensure the TerminalContainer for this worktree is in the DOM.
+    // Ensure the shared terminal dock tracks this worktree path.
     if (!terminalInitializedPaths.has(cwd)) {
       terminalInitializedPaths = new Set([...terminalInitializedPaths, cwd]);
     }
@@ -1444,6 +1568,7 @@
         shell: event.shell,
         label: sessionLabel,
         command: event.command,
+        envVars: event.envVars,
         keepOpenOnCompletion,
         hookId: event.hookId,
       },
@@ -1451,19 +1576,20 @@
     appendOperationLog(`Opened ${event.hookName} in ${locationLabel} terminal.`);
   }
 
-  function handleCreateWorktreeFromGraph(fromRef: string) {
-    selectedRef = fromRef;
+  function openCreateWorktreeModal(fromRef?: string) {
+    selectedRef = fromRef ?? preferredSourceRef(refs, defaultRemoteBranch);
     newBranch = '';
+    formTouched = { branch: false, ref: false };
     createModalOpen = true;
-    // Focus the new branch input after the modal mounts
-    requestAnimationFrame(() => {
-      document.getElementById('modal-new-branch')?.focus();
-    });
+  }
+
+  function handleCreateWorktreeFromGraph(fromRef: string) {
+    openCreateWorktreeModal(fromRef);
   }
 
   async function handleRevealWorktree(path: string) {
     try {
-      await openPath(path);
+      await revealItemInDir(path);
     } catch (err) {
       toast.error(String(err));
     }
@@ -1480,6 +1606,36 @@
 
   function formatHookTrigger(trigger: WorkspaceHookTrigger): string {
     return trigger === 'manual' ? 'manual' : trigger.replaceAll('_', ' ');
+  }
+
+  async function handleActiveWorktreeSwitch(nextWorktreePath: string) {
+    if (!workspace) return;
+    if (pathsEqual(activeWorktreePath, nextWorktreePath)) return;
+
+    const initiatingWorktreePath = activeWorktreePath;
+    const targetWorktree = findPath(worktrees, wt => wt.path, nextWorktreePath);
+    const label = targetWorktree?.branch ?? targetWorktree?.path.split('/').pop() ?? 'worktree';
+
+    try {
+      await beginOperation(
+        'Switching worktree',
+        `Running hooks and switching to ${label}...`,
+        ['before_worktree_switch', 'after_worktree_switch']
+      );
+      await runWorktreeSwitchHooks(
+        workspace.workspacePath,
+        nextWorktreePath,
+        initiatingWorktreePath ?? null,
+        'manual'
+      );
+      activeWorktreePath = nextWorktreePath;
+      activeTerminalPath = nextWorktreePath;
+    } catch (err) {
+      failOperation(String(err));
+      toast.error(String(err));
+    } finally {
+      endOperation();
+    }
   }
 
   async function openRunHookMenu(wt: WorktreeInfo, anchor: HTMLElement) {
@@ -1588,6 +1744,17 @@
         const { [wt.path]: _removedChangeCount, ...remainingChangeCounts } = worktreeChangeCounts;
         worktreeChangeCounts = remainingChangeCounts;
 
+        const deletingActiveWorktree = !!activeWorktreePath && pathsEqual(activeWorktreePath, wt.path);
+        const shouldRunDeleteSwitchHooks = deletingActiveWorktree && !!nextWorktreePath;
+        const operationTriggers: WorkspaceHookTrigger[] = shouldRunDeleteSwitchHooks
+          ? [
+              'before_worktree_switch',
+              'after_worktree_switch',
+              'before_worktree_remove',
+              'after_worktree_remove',
+            ]
+          : ['before_worktree_remove', 'after_worktree_remove'];
+
         if (activeWorktreePath && pathsEqual(activeWorktreePath, wt.path)) {
           activeWorktreePath = nextWorktreePath;
           activeTerminalPath = nextWorktreePath ?? workspace!.workspacePath;
@@ -1600,8 +1767,23 @@
           await beginOperation(
             'Removing worktree',
             'Running hooks and removing worktree files...',
-            ['before_worktree_remove', 'after_worktree_remove']
+            operationTriggers
           );
+          // Release watcher and terminal handles before deletion so that on
+          // Windows the directory is not locked by open file handles.
+          await stopWatchingWorktrees();
+
+          if (shouldRunDeleteSwitchHooks && nextWorktreePath) {
+            await runWorktreeSwitchHooks(
+              workspace!.workspacePath,
+              nextWorktreePath,
+              activeWorktreePath ?? null,
+              'delete'
+            );
+          }
+
+          clearTerminalStateForPath(wt.path);
+          await closeTerminalsForPath(wt.path);
           await deleteManagedWorktree(workspace!.rootPath, wt.path, true, activeWorktreePath);
           toast.success(`Deleted worktree: ${label}`);
           try {
@@ -1738,6 +1920,26 @@
     } else {
       totalCommitCount = refreshedGraph.commits.length;
     }
+
+    const validTerminalPaths = [...refreshedWt.worktrees.map(wt => wt.path), workspace.workspacePath];
+    terminalInitializedPaths = new Set(
+      [...terminalInitializedPaths].filter(path =>
+        validTerminalPaths.some(validPath => pathsEqual(path, validPath))
+      )
+    );
+    hookTerminalLaunchRequests = hookTerminalLaunchRequests.filter(request =>
+      validTerminalPaths.some(validPath => pathsEqual(request.cwd, validPath))
+    );
+    hookTerminalRuns = hookTerminalRuns.filter(run =>
+      validTerminalPaths.some(validPath => pathsEqual(run.cwd, validPath))
+    );
+    if (
+      activeTerminalPath &&
+      !validTerminalPaths.some(validPath => pathsEqual(activeTerminalPath, validPath))
+    ) {
+      activeTerminalPath = activeWorktreePath ?? workspace.workspacePath;
+    }
+
     // Refresh change counts for all non-root worktrees
     const nonRoot = refreshedWt.worktrees
       .filter(wt => !pathsEqual(wt.path, workspaceRootPath))
@@ -1954,10 +2156,7 @@
       {
         label: 'Switch here',
         icon: Repeat,
-        action: () => {
-          activeWorktreePath = wt.path;
-          activeTerminalPath = wt.path;
-        },
+        action: () => void handleActiveWorktreeSwitch(wt.path),
         disabled: isActive,
       },
       { label: 'Open folder', icon: FolderOpen, action: () => handleRevealWorktree(wt.path) },
@@ -2251,11 +2450,7 @@
           <div class="flex items-center gap-1 border-b border-[var(--sg-border-subtle)] px-3 py-2">
             <button
               type="button"
-              onclick={() => {
-                selectedRef = preferredSourceRef(refs, defaultRemoteBranch);
-                createModalOpen = true;
-                formTouched = { branch: false, ref: false };
-              }}
+              onclick={() => openCreateWorktreeModal()}
               class="flex items-center gap-1 rounded-lg bg-[var(--sg-primary)] px-2.5 py-1.5 text-xs font-semibold text-[var(--sg-bg)] hover:bg-[var(--sg-primary-hover)]"
               title="Create worktree"
               aria-label="Create worktree"
@@ -2419,11 +2614,16 @@
             {/if}
             {#each inventoryWorktrees as row, idx}
               {@const isActive = pathsEqual(activeWorktreePath, row.wt.path)}
+              {@const isCreateBusy = (creating && row.wt.path === PENDING_CREATION_PATH) || (Boolean(createOperationPath) && pathsEqual(createOperationPath, row.wt.path))}
+              {@const isHookBusy = Boolean(runningHooksByCwd[row.wt.path])}
+              {@const isDeleteBusy = deleting !== null && pathsEqual(deleting, row.wt.path)}
+              {@const isRowBusy = isCreateBusy || isHookBusy || isDeleteBusy}
               <!-- svelte-ignore a11y_no_static_element_interactions -->
               <!-- svelte-ignore a11y_click_events_have_key_events -->
               <div
-                class="group flex cursor-pointer items-center gap-2 px-3 py-2 transition-colors hover:bg-[var(--sg-surface-raised)] {idx >
-                0
+                class="group flex items-center gap-2 px-3 py-2 transition-colors {isDeleteBusy || isCreateBusy
+                  ? 'cursor-not-allowed opacity-60'
+                  : 'cursor-pointer hover:bg-[var(--sg-surface-raised)]'} {idx > 0
                   ? 'border-t border-[var(--sg-border-subtle)]'
                   : ''}"
                 data-testid="worktree-item"
@@ -2433,20 +2633,34 @@
                 role="radio"
                 aria-checked={isActive}
                 tabindex={isActive ? 0 : -1}
-                onclick={() => {
-                  activeWorktreePath = row.wt.path;
-                  activeTerminalPath = row.wt.path;
-                }}
-                oncontextmenu={e => handleWorktreeContextMenu(row.wt, e, row.section)}
+                onclick={() => { if (!isDeleteBusy && !isCreateBusy) void handleActiveWorktreeSwitch(row.wt.path); }}
+                oncontextmenu={e => { if (!isDeleteBusy && !isCreateBusy) handleWorktreeContextMenu(row.wt, e, row.section); }}
               >
                 <!-- Faux radio indicator -->
                 <span
                   aria-hidden="true"
-                  class="mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border transition-colors {isActive
-                    ? 'border-[var(--sg-primary)]'
-                    : 'border-[var(--sg-border)] group-hover:border-[var(--sg-primary)]/60'}"
+                  class="relative mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border transition-colors {isRowBusy
+                    ? 'border-transparent'
+                    : isActive
+                      ? 'border-[var(--sg-primary)]'
+                      : 'border-[var(--sg-border)] group-hover:border-[var(--sg-primary)]/60'}"
                 >
-                  {#if isActive}
+                  {#if isRowBusy}
+                    <svg
+                      class="pointer-events-none h-3.5 w-3.5 text-[var(--sg-primary)]"
+                      style="animation: sg-spin 0.8s linear infinite"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" opacity="0.2" />
+                      <path
+                        d="M12 2a10 10 0 0 1 10 10"
+                        stroke="currentColor"
+                        stroke-width="3"
+                        stroke-linecap="round"
+                      />
+                    </svg>
+                  {:else if isActive}
                     <span class="h-1.5 w-1.5 rounded-full bg-[var(--sg-primary)]"></span>
                   {/if}
                 </span>
@@ -2473,11 +2687,13 @@
                     {/if}
                   </div>
                   <p class="truncate text-[10px] text-[var(--sg-text-dim)]">
-                    {tildify(row.wt.path)}
+                    {row.wt.path === PENDING_CREATION_PATH ? '' : tildify(row.wt.path)}
                   </p>
                 </div>
                 <div
-                  class="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 {isActive
+                  class="flex shrink-0 items-center gap-0.5 transition-opacity {isRowBusy
+                    ? 'pointer-events-none opacity-0'
+                    : 'opacity-0 group-hover:opacity-100'} {isActive && !isRowBusy
                     ? 'opacity-100'
                     : ''}"
                 >
@@ -2596,74 +2812,6 @@
                 ></span>
               {/if}
             </button>
-          </div>
-        {/if}
-
-        {#if operationStatus}
-          <div
-            data-testid="hook-operation-header"
-            class="flex items-center justify-between gap-3 border-b border-[var(--sg-border)] bg-[var(--sg-surface-raised)] px-3 py-2"
-          >
-            <div class="min-w-0">
-              <p class="truncate text-xs font-semibold text-[var(--sg-text)]">
-                {operationStatus.title}
-              </p>
-              <p class="truncate text-[10px] text-[var(--sg-text-faint)]">
-                {#if operationCompleted}
-                  {operationStatus.detail} Completed.
-                {:else if activeHookName}
-                  {operationStatus.detail} Running: {activeHookName}
-                {:else}
-                  {operationStatus.detail}
-                {/if}
-              </p>
-              {#if lastOperationLog}
-                <p class="truncate text-[10px] text-[var(--sg-text-faint)]">{lastOperationLog}</p>
-              {/if}
-              <div class="mt-1 flex flex-wrap items-center gap-1 text-[10px]">
-                <span
-                  class="rounded border border-[var(--sg-border)] bg-[var(--sg-surface)] px-1.5 py-px text-[var(--sg-text-faint)]"
-                  >Pending: {hookStatusSummary.pending}</span
-                >
-                <span
-                  class="rounded border border-[var(--sg-accent)]/40 bg-[var(--sg-accent)]/15 px-1.5 py-px text-[var(--sg-accent)]"
-                  >Running: {hookStatusSummary.running}</span
-                >
-                <span
-                  class="rounded border border-[var(--sg-primary)]/40 bg-[var(--sg-primary)]/15 px-1.5 py-px text-[var(--sg-primary)]"
-                  >Complete: {hookStatusSummary.success}</span
-                >
-                <span
-                  class="rounded border border-[var(--sg-warning)]/40 bg-[var(--sg-warning)]/15 px-1.5 py-px text-[var(--sg-warning)]"
-                  >Skipped: {hookStatusSummary.skipped}</span
-                >
-                <span
-                  class="rounded border border-[var(--sg-danger)]/40 bg-[var(--sg-danger)]/15 px-1.5 py-px text-[var(--sg-danger)]"
-                  >Errors: {hookStatusSummary.error + hookStatusSummary.timed_out}</span
-                >
-              </div>
-            </div>
-            <div class="flex shrink-0 items-center gap-2">
-              <button
-                data-testid="hook-operation-show-terminals"
-                onclick={() => {
-                  activeTab = 'terminal';
-                  activeTerminalPath =
-                    activeTerminalPath ?? activeWorktreePath ?? workspace?.workspacePath ?? null;
-                }}
-                class="rounded border border-[var(--sg-border)] px-2 py-1 text-[10px] text-[var(--sg-text-dim)] hover:bg-[var(--sg-surface)] hover:text-[var(--sg-text)]"
-              >
-                Show terminals
-              </button>
-              {#if operationError || operationCompleted}
-                <button
-                  onclick={() => endOperation(true)}
-                  class="rounded border border-[var(--sg-border)] px-2 py-1 text-[10px] text-[var(--sg-text-dim)] hover:bg-[var(--sg-surface)] hover:text-[var(--sg-text)]"
-                >
-                  {operationError ? 'Dismiss' : 'Close'}
-                </button>
-              {/if}
-            </div>
           </div>
         {/if}
 
@@ -3071,7 +3219,6 @@
             </div>
           {/if}
         {:else}
-          <!-- Root worktree (protected) message, or terminal tab with no shell -->
           {#if activeTab === 'terminal' && !defaultShell}
             <div class="flex flex-1 items-center justify-center">
               <p class="text-sm text-[var(--sg-text-faint)]">No shell detected on this system</p>
@@ -3095,7 +3242,7 @@
         {#each [...terminalInitializedPaths] as wtPath (wtPath)}
           <div
             class="flex min-h-0 flex-1 flex-col overflow-hidden"
-            style:display={activeTab === 'terminal' && activeTerminalPath === wtPath
+            style:display={activeTab === 'terminal' && pathsEqual(activeTerminalPath ?? '', wtPath)
               ? 'flex'
               : 'none'}
           >
@@ -3104,16 +3251,10 @@
               {availableShells}
               cwd={wtPath}
               launchRequests={hookTerminalLaunchRequests}
-              forcedLayout={shouldLockHookTerminals ? 'grid' : null}
-              interactionLocked={Boolean(operationStatus) || Boolean(runningHooksByCwd[wtPath])}
-              lockReason={operationStatus
-                ? activeHookName
-                  ? `Running ${activeHookName} (input locked)`
-                  : 'Operation in progress (input locked)'
-                : 'Hook run in progress (input locked)'}
             />
           </div>
         {/each}
+
       </section>
     </div>
   {/if}
@@ -3353,6 +3494,7 @@
           >
           <input
             id="modal-new-branch"
+            bind:this={newBranchInputEl}
             bind:value={newBranch}
             oninput={() => (formTouched.branch = true)}
             data-testid="input-new-branch"

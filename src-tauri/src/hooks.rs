@@ -1,8 +1,9 @@
 use sea_orm::{ConnectionTrait, DbBackend, FromQueryResult, Statement};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Output;
+use std::sync::{LazyLock, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::task::JoinSet;
 
@@ -25,10 +26,13 @@ pub struct WorkspaceHook {
     pub script: String,
     pub enabled: bool,
     pub critical: bool,
+    pub switch_once_per_session: bool,
     pub keep_open_on_completion: bool,
     pub timeout_seconds: u32,
     pub created_at: i64,
     pub updated_at: i64,
+    pub switch_run_on_create: bool,
+    pub switch_run_on_delete: bool,
 }
 
 #[derive(Serialize)]
@@ -44,11 +48,14 @@ pub struct WorkspaceHookWithDependencies {
     pub script: String,
     pub enabled: bool,
     pub critical: bool,
+    pub switch_once_per_session: bool,
     pub keep_open_on_completion: bool,
     pub timeout_seconds: u32,
     pub created_at: i64,
     pub updated_at: i64,
     pub dependency_ids: Vec<String>,
+    pub switch_run_on_create: bool,
+    pub switch_run_on_delete: bool,
 }
 
 #[derive(Deserialize)]
@@ -62,9 +69,12 @@ pub struct HookUpsertInput {
     pub script: String,
     pub enabled: bool,
     pub critical: bool,
+    pub switch_once_per_session: bool,
     pub keep_open_on_completion: bool,
     pub timeout_seconds: u32,
     pub dependency_ids: Vec<String>,
+    pub switch_run_on_create: bool,
+    pub switch_run_on_delete: bool,
 }
 
 #[derive(Clone)]
@@ -78,8 +88,18 @@ struct RuntimeHook {
     shell: String,
     script: String,
     critical: bool,
+    switch_once_per_session: bool,
     keep_open_on_completion: bool,
     timeout_seconds: u32,
+    switch_run_on_create: bool,
+    switch_run_on_delete: bool,
+}
+
+enum SwitchHookSource {
+    Manual,
+    Create,
+    Delete,
+    Load,
 }
 
 #[derive(Clone)]
@@ -95,6 +115,7 @@ struct RuntimeHookResult {
     hook_id: String,
     hook_name: String,
     critical: bool,
+    switch_once_per_session: bool,
     keep_open_on_completion: bool,
     status: String,
     success: bool,
@@ -131,6 +152,7 @@ struct HookTerminalLaunchEvent {
     shell: String,
     cwd: String,
     command: String,
+    env_vars: HashMap<String, String>,
     keep_open_on_completion: bool,
 }
 
@@ -153,6 +175,8 @@ const ALLOWED_TRIGGERS: &[&str] = &[
 const ALLOWED_SCOPES: &[&str] = &["worktree", "workspace"];
 const ALLOWED_EXECUTION_TARGETS: &[&str] =
     &["workspace", "trigger_worktree", "initiating_worktree"];
+static SWITCH_HOOK_SESSION_RUNS: LazyLock<Mutex<HashSet<String>>> =
+    LazyLock::new(|| Mutex::new(HashSet::new()));
 
 fn detect_available_hook_shells() -> Vec<String> {
     let detected: Vec<String> = shell_candidates_for_current_os()
@@ -251,6 +275,47 @@ fn trigger_supports_initiating_worktree(trigger: &str) -> bool {
             | "before_worktree_remove"
             | "after_worktree_remove"
     )
+}
+
+fn trigger_supports_switch_once_per_session(trigger: &str) -> bool {
+    matches!(trigger, "before_worktree_switch" | "after_worktree_switch")
+}
+
+fn validate_switch_once_per_session(trigger: &str, enabled: bool) -> Result<bool, String> {
+    if enabled && !trigger_supports_switch_once_per_session(trigger) {
+        return Err(
+            "switchOncePerSession can only be enabled for worktree switch hooks".to_string(),
+        );
+    }
+
+    Ok(enabled)
+}
+
+fn normalize_switch_auto_run_flags(
+    trigger: &str,
+    run_on_create: bool,
+    run_on_delete: bool,
+) -> (bool, bool) {
+    if trigger_supports_switch_once_per_session(trigger) {
+        (run_on_create, run_on_delete)
+    } else {
+        (true, false)
+    }
+}
+
+fn parse_switch_hook_source(raw: Option<&str>) -> Result<SwitchHookSource, String> {
+    let normalized = raw
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("manual");
+
+    match normalized {
+        "manual" => Ok(SwitchHookSource::Manual),
+        "create" => Ok(SwitchHookSource::Create),
+        "delete" => Ok(SwitchHookSource::Delete),
+        "load" => Ok(SwitchHookSource::Load),
+        _ => Err(format!("Unsupported switch hook source: {normalized}")),
+    }
 }
 
 fn validate_execution_preferences(trigger: &str, execution_target: &str) -> Result<(), String> {
@@ -369,22 +434,6 @@ fn trigger_parts(trigger: &str) -> (String, String) {
     };
 
     (phase.to_string(), action.to_string())
-}
-
-fn quote_posix_env_value(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\"'\"'"))
-}
-
-fn quote_powershell_env_value(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "''"))
-}
-
-fn shell_env_assignment(shell: &str, key: &str, value: &str) -> String {
-    if matches!(shell, "pwsh" | "powershell") {
-        format!("$env:{key} = {}", quote_powershell_env_value(value))
-    } else {
-        format!("export {key}={}", quote_posix_env_value(value))
-    }
 }
 
 fn path_tail(path: &Path) -> String {
@@ -561,17 +610,7 @@ fn build_hook_environment(
     env
 }
 
-fn compose_terminal_command(
-    shell: &str,
-    env: &[(String, String)],
-    script: &str,
-    exit_after: bool,
-) -> String {
-    let assignments = env
-        .iter()
-        .map(|(key, value)| shell_env_assignment(shell, key, value))
-        .collect::<Vec<_>>();
-
+fn compose_terminal_command(shell: &str, script: &str, exit_after: bool) -> String {
     // Two rendering modes depending on `exit_after`:
     //
     // PTY-input mode (`exit_after=false`, keep_open_on_completion=true):
@@ -588,15 +627,14 @@ fn compose_terminal_command(
         if exit_after {
             // Non-interactive: semicolon-joined for -NonInteractive -Command.
             let script_for_command = script.replace('\n', "; ");
-            format!("{}; {}", assignments.join("; "), script_for_command)
+            script_for_command
         } else {
             // PTY-input: CR as line terminator in interactive mode.
-            let script_for_pty = script.replace('\n', "\r");
-            format!("{}; {}", assignments.join("; "), script_for_pty)
+            script.replace('\n', "\r")
         }
     } else {
         // POSIX: newline-separated format works for both PTY input and -c mode.
-        format!("{}\n{}\n", assignments.join("\n"), script)
+        format!("{script}\n")
     }
 }
 
@@ -772,7 +810,7 @@ async fn load_hook_by_id(
     let statement = Statement::from_sql_and_values(
         DbBackend::Sqlite,
         "
-        SELECT id, name, scope, trigger, execution_target, execution_mode, shell, script, enabled, critical, keep_open_on_completion, timeout_seconds, created_at, updated_at
+        SELECT id, name, scope, trigger, execution_target, execution_mode, shell, script, enabled, critical, switch_once_per_session, switch_run_on_create, switch_run_on_delete, keep_open_on_completion, timeout_seconds, created_at, updated_at
         FROM hook_definitions
         WHERE id = ?
         LIMIT 1
@@ -891,6 +929,7 @@ async fn execute_hook(
                     hook_id: hook.id,
                     hook_name: hook.name,
                     critical: hook.critical,
+                    switch_once_per_session: hook.switch_once_per_session,
                     keep_open_on_completion: hook.keep_open_on_completion,
                     status: "failed".to_string(),
                     success: false,
@@ -911,6 +950,7 @@ async fn execute_hook(
                     hook_id: hook.id,
                     hook_name: hook.name,
                     critical: hook.critical,
+                    switch_once_per_session: hook.switch_once_per_session,
                     keep_open_on_completion: hook.keep_open_on_completion,
                     status: "failed".to_string(),
                     success: false,
@@ -929,6 +969,7 @@ async fn execute_hook(
                     hook_id: hook.id,
                     hook_name: hook.name,
                     critical: hook.critical,
+                    switch_once_per_session: hook.switch_once_per_session,
                     keep_open_on_completion: hook.keep_open_on_completion,
                     status: "failed".to_string(),
                     success: false,
@@ -942,12 +983,8 @@ async fn execute_hook(
         };
 
         use tauri::Emitter;
-        let command = compose_terminal_command(
-            &hook.shell,
-            &env,
-            &hook.script,
-            !hook.keep_open_on_completion,
-        );
+        let command = compose_terminal_command(&hook.shell, &hook.script, !hook.keep_open_on_completion);
+        let env_vars: HashMap<String, String> = env.into_iter().collect();
         let emit_result = app.emit(
             "hook-terminal-launch",
             HookTerminalLaunchEvent {
@@ -957,6 +994,7 @@ async fn execute_hook(
                 shell: hook.shell.clone(),
                 cwd: path_to_frontend(worktree_path),
                 command,
+                env_vars,
                 keep_open_on_completion: hook.keep_open_on_completion,
             },
         );
@@ -967,6 +1005,7 @@ async fn execute_hook(
                     hook_id: hook.id,
                     hook_name: hook.name,
                     critical: hook.critical,
+                    switch_once_per_session: hook.switch_once_per_session,
                     keep_open_on_completion: hook.keep_open_on_completion,
                     status: "success".to_string(),
                     success: true,
@@ -980,6 +1019,7 @@ async fn execute_hook(
                     hook_id: hook.id,
                     hook_name: hook.name,
                     critical: hook.critical,
+                    switch_once_per_session: hook.switch_once_per_session,
                     keep_open_on_completion: hook.keep_open_on_completion,
                     status: "failed".to_string(),
                     success: false,
@@ -996,6 +1036,7 @@ async fn execute_hook(
             hook_id: hook.id,
             hook_name: hook.name,
             critical: hook.critical,
+            switch_once_per_session: hook.switch_once_per_session,
             keep_open_on_completion: hook.keep_open_on_completion,
             status: "failed".to_string(),
             success: false,
@@ -1043,8 +1084,132 @@ fn to_runtime_hook(hook: WorkspaceHook) -> RuntimeHook {
         shell: hook.shell,
         script: hook.script,
         critical: hook.critical,
+        switch_once_per_session: hook.switch_once_per_session,
+        switch_run_on_create: hook.switch_run_on_create,
+        switch_run_on_delete: hook.switch_run_on_delete,
         keep_open_on_completion: hook.keep_open_on_completion,
         timeout_seconds: hook.timeout_seconds,
+    }
+}
+
+fn hook_runs_for_switch_source(hook: &RuntimeHook, source: &SwitchHookSource) -> bool {
+    if !trigger_supports_switch_once_per_session(&hook.trigger) {
+        return true;
+    }
+
+    match source {
+        SwitchHookSource::Manual => true,
+        SwitchHookSource::Create => hook.switch_run_on_create,
+        SwitchHookSource::Delete => hook.switch_run_on_delete,
+        SwitchHookSource::Load => true,
+    }
+}
+
+fn filter_hooks_for_switch_source(
+    hooks: HashMap<String, RuntimeHook>,
+    dependency_map: HashMap<String, Vec<String>>,
+    source: &SwitchHookSource,
+) -> (HashMap<String, RuntimeHook>, HashMap<String, Vec<String>>) {
+    let included_ids: HashSet<String> = hooks
+        .iter()
+        .filter_map(|(hook_id, hook)| {
+            if hook_runs_for_switch_source(hook, source) {
+                Some(hook_id.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let filtered_hooks: HashMap<String, RuntimeHook> = hooks
+        .into_iter()
+        .filter(|(hook_id, _)| included_ids.contains(hook_id))
+        .collect();
+
+    let filtered_dependencies: HashMap<String, Vec<String>> = dependency_map
+        .into_iter()
+        .filter_map(|(hook_id, dependencies)| {
+            if !included_ids.contains(&hook_id) {
+                return None;
+            }
+
+            let filtered = dependencies
+                .into_iter()
+                .filter(|dependency_id| included_ids.contains(dependency_id))
+                .collect();
+            Some((hook_id, filtered))
+        })
+        .collect();
+
+    (filtered_hooks, filtered_dependencies)
+}
+
+fn build_switch_hook_session_key(
+    trigger: &str,
+    hook_id: &str,
+    context: &HookExecutionContext,
+) -> Option<String> {
+    if !trigger_supports_switch_once_per_session(trigger) {
+        return None;
+    }
+
+    let worktree_path = context
+        .trigger_worktree_path
+        .as_ref()
+        .or(context.initiating_worktree_path.as_ref())?;
+
+    Some(format!(
+        "{}|{}|{}|{}",
+        path_to_frontend(&context.workspace_path),
+        trigger,
+        hook_id,
+        path_to_frontend(worktree_path)
+    ))
+}
+
+fn should_skip_switch_hook_once_per_session(
+    trigger: &str,
+    hook: &RuntimeHook,
+    context: &HookExecutionContext,
+) -> bool {
+    if !hook.switch_once_per_session {
+        return false;
+    }
+
+    let Some(key) = build_switch_hook_session_key(trigger, &hook.id, context) else {
+        return false;
+    };
+
+    SWITCH_HOOK_SESSION_RUNS
+        .lock()
+        .map(|runs| runs.contains(&key))
+        .unwrap_or(false)
+}
+
+fn mark_switch_hook_ran_this_session(trigger: &str, hook_id: &str, context: &HookExecutionContext) {
+    let Some(key) = build_switch_hook_session_key(trigger, hook_id, context) else {
+        return;
+    };
+
+    if let Ok(mut runs) = SWITCH_HOOK_SESSION_RUNS.lock() {
+        runs.insert(key);
+    }
+}
+
+pub(crate) fn clear_switch_hook_session_runs_for_worktree(
+    workspace_path: &Path,
+    worktree_path: &Path,
+) {
+    let workspace_prefix = format!("{}|", path_to_frontend(workspace_path));
+    let worktree_suffix = format!("|{}", path_to_frontend(worktree_path));
+
+    if let Ok(mut runs) = SWITCH_HOOK_SESSION_RUNS.lock() {
+        runs.retain(|entry| {
+            !(entry.starts_with(&workspace_prefix)
+                && entry.ends_with(&worktree_suffix)
+                && (entry.contains("|before_worktree_switch|")
+                    || entry.contains("|after_worktree_switch|")))
+        });
     }
 }
 
@@ -1066,6 +1231,70 @@ async fn execute_loaded_hooks(
         .unwrap_or(&context.workspace_path)
         .to_string_lossy()
         .to_string();
+
+    let mut session_skipped_ids: Vec<String> = pending
+        .iter()
+        .filter_map(|(hook_id, hook)| {
+            if should_skip_switch_hook_once_per_session(trigger, hook, context) {
+                Some(hook_id.clone())
+            } else {
+                None
+            }
+        })
+        .collect();
+    session_skipped_ids.sort();
+
+    for hook_id in session_skipped_ids {
+        if let Some(hook) = pending.remove(&hook_id) {
+            let reason =
+                "Skipped because this hook is set to run only on the first switch each session"
+                    .to_string();
+            let result = RuntimeHookResult {
+                hook_id: hook.id.clone(),
+                hook_name: hook.name.clone(),
+                critical: hook.critical,
+                switch_once_per_session: hook.switch_once_per_session,
+                keep_open_on_completion: hook.keep_open_on_completion,
+                status: "skipped".to_string(),
+                success: true,
+                error_message: Some(reason.clone()),
+            };
+
+            insert_hook_run(
+                conn,
+                HookRunRecord {
+                    hook_id: hook.id.clone(),
+                    trigger: trigger.to_string(),
+                    worktree_path: run_record_path.clone(),
+                    status: "skipped".to_string(),
+                    started_at: now_epoch_seconds() as i64,
+                    finished_at: Some(now_epoch_seconds() as i64),
+                    exit_code: None,
+                    stdout: None,
+                    stderr: None,
+                    error_message: Some(reason.clone()),
+                },
+            )
+            .await?;
+
+            emit_hook_progress(
+                app_handle,
+                HookProgressEvent {
+                    trigger: trigger.to_string(),
+                    hook_id: hook.id.clone(),
+                    hook_name: hook.name.clone(),
+                    keep_open_on_completion: hook.keep_open_on_completion,
+                    phase: "skipped".to_string(),
+                    status: "skipped".to_string(),
+                    stdout_snippet: None,
+                    stderr_snippet: None,
+                    error_message: Some(reason),
+                },
+            );
+
+            completed.insert(hook.id, result);
+        }
+    }
 
     while !pending.is_empty() {
         let mut ready_ids: Vec<String> = pending
@@ -1095,6 +1324,7 @@ async fn execute_loaded_hooks(
                         hook_id: blocked.id.clone(),
                         hook_name: blocked.name.clone(),
                         critical: blocked.critical,
+                        switch_once_per_session: blocked.switch_once_per_session,
                         keep_open_on_completion: blocked.keep_open_on_completion,
                         status: "skipped".to_string(),
                         success: false,
@@ -1194,6 +1424,8 @@ async fn execute_loaded_hooks(
                     } else {
                         summary.failed_non_critical_hooks.push(name.clone());
                     }
+                } else if hook_result.switch_once_per_session {
+                    mark_switch_hook_ran_this_session(trigger, &hook_result.hook_id, context);
                 }
 
                 insert_hook_run(
@@ -1243,7 +1475,7 @@ async fn load_hooks_for_trigger(
     let hook_statement = Statement::from_sql_and_values(
         DbBackend::Sqlite,
         "
-        SELECT id, name, scope, trigger, execution_target, execution_mode, shell, script, enabled, critical, keep_open_on_completion, timeout_seconds, created_at, updated_at
+        SELECT id, name, scope, trigger, execution_target, execution_mode, shell, script, enabled, critical, switch_once_per_session, switch_run_on_create, switch_run_on_delete, keep_open_on_completion, timeout_seconds, created_at, updated_at
         FROM hook_definitions
         WHERE trigger = ? AND enabled = 1
         ORDER BY name ASC
@@ -1385,7 +1617,7 @@ pub async fn list_workspace_hooks(
         Statement::from_sql_and_values(
             DbBackend::Sqlite,
             "
-            SELECT id, name, scope, trigger, execution_target, execution_mode, shell, script, enabled, critical, keep_open_on_completion, timeout_seconds, created_at, updated_at
+            SELECT id, name, scope, trigger, execution_target, execution_mode, shell, script, enabled, critical, switch_once_per_session, switch_run_on_create, switch_run_on_delete, keep_open_on_completion, timeout_seconds, created_at, updated_at
             FROM hook_definitions
             WHERE trigger = ?
             ORDER BY name ASC
@@ -1396,7 +1628,7 @@ pub async fn list_workspace_hooks(
         Statement::from_string(
             DbBackend::Sqlite,
             "
-            SELECT id, name, scope, trigger, execution_target, execution_mode, shell, script, enabled, critical, keep_open_on_completion, timeout_seconds, created_at, updated_at
+            SELECT id, name, scope, trigger, execution_target, execution_mode, shell, script, enabled, critical, switch_once_per_session, switch_run_on_create, switch_run_on_delete, keep_open_on_completion, timeout_seconds, created_at, updated_at
             FROM hook_definitions
             ORDER BY trigger ASC, name ASC
             "
@@ -1426,6 +1658,9 @@ pub async fn list_workspace_hooks(
             script: hook.script,
             enabled: hook.enabled,
             critical: hook.critical,
+            switch_once_per_session: hook.switch_once_per_session,
+            switch_run_on_create: hook.switch_run_on_create,
+            switch_run_on_delete: hook.switch_run_on_delete,
             keep_open_on_completion: hook.keep_open_on_completion,
             timeout_seconds: hook.timeout_seconds,
             created_at: hook.created_at,
@@ -1451,6 +1686,13 @@ pub async fn create_workspace_hook(
     let execution_target = validate_execution_target(&input.execution_target)?;
     let execution_mode = "terminal_tab".to_string();
     validate_execution_preferences(&trigger, &execution_target)?;
+    let switch_once_per_session =
+        validate_switch_once_per_session(&trigger, input.switch_once_per_session)?;
+    let (switch_run_on_create, switch_run_on_delete) = normalize_switch_auto_run_flags(
+        &trigger,
+        input.switch_run_on_create,
+        input.switch_run_on_delete,
+    );
     let shell = validate_shell(&input.shell)?;
     let script = normalize_hook_script(&input.script)?;
     let timeout_seconds = validate_timeout(input.timeout_seconds)? as i64;
@@ -1470,12 +1712,15 @@ pub async fn create_workspace_hook(
             script,
             enabled,
             critical,
+            switch_once_per_session,
+            switch_run_on_create,
+            switch_run_on_delete,
             keep_open_on_completion,
             timeout_seconds,
             created_at,
             updated_at
         )
-            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ",
         vec![
             id.clone().into(),
@@ -1488,6 +1733,9 @@ pub async fn create_workspace_hook(
             script.clone().into(),
             (input.enabled as i64).into(),
             (input.critical as i64).into(),
+            (switch_once_per_session as i64).into(),
+            (switch_run_on_create as i64).into(),
+            (switch_run_on_delete as i64).into(),
             (input.keep_open_on_completion as i64).into(),
             timeout_seconds.into(),
             now.into(),
@@ -1523,6 +1771,9 @@ pub async fn create_workspace_hook(
         script: hook.script,
         enabled: hook.enabled,
         critical: hook.critical,
+        switch_once_per_session: hook.switch_once_per_session,
+        switch_run_on_create: hook.switch_run_on_create,
+        switch_run_on_delete: hook.switch_run_on_delete,
         keep_open_on_completion: hook.keep_open_on_completion,
         timeout_seconds: hook.timeout_seconds,
         created_at: hook.created_at,
@@ -1546,6 +1797,13 @@ pub async fn update_workspace_hook(
     let execution_target = validate_execution_target(&input.execution_target)?;
     let execution_mode = "terminal_tab".to_string();
     validate_execution_preferences(&trigger, &execution_target)?;
+    let switch_once_per_session =
+        validate_switch_once_per_session(&trigger, input.switch_once_per_session)?;
+    let (switch_run_on_create, switch_run_on_delete) = normalize_switch_auto_run_flags(
+        &trigger,
+        input.switch_run_on_create,
+        input.switch_run_on_delete,
+    );
     let shell = validate_shell(&input.shell)?;
     let script = normalize_hook_script(&input.script)?;
     let timeout_seconds = validate_timeout(input.timeout_seconds)? as i64;
@@ -1564,6 +1822,9 @@ pub async fn update_workspace_hook(
             script = ?,
             enabled = ?,
             critical = ?,
+            switch_once_per_session = ?,
+            switch_run_on_create = ?,
+            switch_run_on_delete = ?,
             keep_open_on_completion = ?,
             timeout_seconds = ?,
             updated_at = ?
@@ -1579,6 +1840,9 @@ pub async fn update_workspace_hook(
             script.clone().into(),
             (input.enabled as i64).into(),
             (input.critical as i64).into(),
+            (switch_once_per_session as i64).into(),
+            (switch_run_on_create as i64).into(),
+            (switch_run_on_delete as i64).into(),
             (input.keep_open_on_completion as i64).into(),
             timeout_seconds.into(),
             now.into(),
@@ -1619,6 +1883,9 @@ pub async fn update_workspace_hook(
         script: hook.script,
         enabled: hook.enabled,
         critical: hook.critical,
+        switch_once_per_session: hook.switch_once_per_session,
+        switch_run_on_create: hook.switch_run_on_create,
+        switch_run_on_delete: hook.switch_run_on_delete,
         keep_open_on_completion: hook.keep_open_on_completion,
         timeout_seconds: hook.timeout_seconds,
         created_at: hook.created_at,
@@ -1740,6 +2007,78 @@ pub async fn run_workspace_hook(
             "Hook run completed with failures ({})",
             parts.join("; ")
         ));
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn run_worktree_switch_hooks(
+    app_handle: tauri::AppHandle,
+    workspace_path: String,
+    target_worktree_path: String,
+    initiating_worktree_path: Option<String>,
+    source: Option<String>,
+) -> Result<(), String> {
+    let workspace = normalize_workspace_path(&workspace_path)?;
+    let target_worktree = normalize_existing_dir(&target_worktree_path, "Target worktree path")?;
+    let initiating_worktree = normalize_optional_existing_dir(
+        initiating_worktree_path.as_deref(),
+        "Initiating worktree path",
+    )?;
+
+    let source = parse_switch_hook_source(source.as_deref())?;
+
+    let context = HookExecutionContext {
+        workspace_path: workspace.clone(),
+        trigger_worktree_path: Some(target_worktree),
+        initiating_worktree_path: initiating_worktree,
+        source_ref: None,
+    };
+
+    let conn = connect_workspace_db(&workspace.to_string_lossy()).await?;
+
+    let (before_hooks, before_dependencies) =
+        load_hooks_for_trigger(&conn, "before_worktree_switch").await?;
+    let (before_hooks, before_dependencies) =
+        filter_hooks_for_switch_source(before_hooks, before_dependencies, &source);
+
+    let before_summary = if before_hooks.is_empty() {
+        HookExecutionSummary::default()
+    } else {
+        execute_loaded_hooks(
+            &conn,
+            "before_worktree_switch",
+            before_hooks,
+            before_dependencies,
+            &context,
+            Some(&app_handle),
+        )
+        .await?
+    };
+
+    if before_summary.had_critical_failure {
+        return Err(format!(
+            "Worktree switch blocked by critical hook failure(s): {}",
+            before_summary.failed_critical_hooks.join(", ")
+        ));
+    }
+
+    let (after_hooks, after_dependencies) =
+        load_hooks_for_trigger(&conn, "after_worktree_switch").await?;
+    let (after_hooks, after_dependencies) =
+        filter_hooks_for_switch_source(after_hooks, after_dependencies, &source);
+
+    if !after_hooks.is_empty() {
+        let _ = execute_loaded_hooks(
+            &conn,
+            "after_worktree_switch",
+            after_hooks,
+            after_dependencies,
+            &context,
+            Some(&app_handle),
+        )
+        .await;
     }
 
     Ok(())

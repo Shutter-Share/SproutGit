@@ -21,7 +21,7 @@
   }
 </script>
 
-<div class="pointer-events-none fixed right-0 top-0 z-50 flex flex-col gap-2 p-4">
+<div class="pointer-events-none fixed bottom-0 left-0 z-50 flex flex-col gap-2 p-4">
   {#each toasts() as t (t.id)}
     <div
       data-testid="toast-item"
