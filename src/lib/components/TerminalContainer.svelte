@@ -2,14 +2,22 @@
   import { tick } from 'svelte';
   import TerminalPanel from './TerminalPanel.svelte';
   import ContextMenu, { type MenuItem } from './ContextMenu.svelte';
+  import { closeTerminal } from '$lib/sproutgit';
+  import {
+    clearTerminalContainerCache,
+    getTerminalContainerCache,
+    setTerminalContainerCache,
+  } from '$lib/terminal-session-cache.svelte';
 
   type Session = {
     id: string;
     shell: string;
     label: string;
     initialCommand?: string;
+    envVars?: Record<string, string>;
     autoCloseOnExit?: boolean;
     hookId?: string;
+    ptyId?: string;
   };
 
   type TerminalLaunchRequest = {
@@ -18,6 +26,7 @@
     shell: string;
     label: string;
     command: string;
+    envVars?: Record<string, string>;
     keepOpenOnCompletion?: boolean;
     /**
      * When set, identifies the hook that triggered this launch.  Forwarded to
@@ -35,7 +44,6 @@
     availableShells: string[];
     cwd: string;
     launchRequests?: TerminalLaunchRequest[];
-    forcedLayout?: Layout | null;
     interactionLocked?: boolean;
     lockReason?: string;
   };
@@ -45,27 +53,46 @@
     availableShells,
     cwd,
     launchRequests = [],
-    forcedLayout = null,
     interactionLocked = false,
     lockReason = 'Hook run in progress',
   }: Props = $props();
 
   // ── Session state ─────────────────────────────────────────────────────────
-  let sessions = $state<Session[]>([]);
-  let activeId = $state<string | null>(null);
-  let layout = $state<Layout>('tabs');
+  const cachedState = getTerminalContainerCache(cwd);
+  let sessions = $state<Session[]>(cachedState.sessions);
+  let activeId = $state<string | null>(cachedState.activeId);
+  let layout = $state<Layout>(cachedState.layout);
   let showAddMenu = $state(false);
+  let pendingReadyFocusId = $state<string | null>(null);
   let counter = 0;
   // Track IDs of launch requests that have already been processed so that
   // each entry in the `launchRequests` array is handled exactly once even
   // when two hooks fire back-to-back and Svelte batches the prop updates.
   const processedLaunchIds = new Set<string>();
+  // If sessions were restored from cache, skip the auto-spawn so we don't
+  // add a duplicate blank shell on top of the restored sessions.
+  let _autoSpawned = cachedState.sessions.length > 0;
+
+  function persistContainerState() {
+    setTerminalContainerCache(cwd, {
+      sessions,
+      activeId,
+      layout,
+    });
+  }
+
+  $effect(() => {
+    sessions;
+    activeId;
+    layout;
+    persistContainerState();
+  });
 
   // Auto-spawn the first session when the component mounts and a default shell is available.
   // The plain (non-reactive) `_autoSpawned` flag ensures this runs only once even if
   // `defaultShell` later changes, and prevents a reactive loop since `sessions` is never
-  // read inside this effect.
-  let _autoSpawned = false;
+  // read inside this effect. It starts as `true` when sessions were restored from cache
+  // so we don't add a duplicate blank shell on top of the restored sessions.
   $effect(() => {
     const pendingForThisCwd = launchRequests.filter(
       r => r.cwd === cwd && !processedLaunchIds.has(r.id)
@@ -74,11 +101,11 @@
     if (!_autoSpawned && defaultShell) {
       _autoSpawned = true;
       // Only spawn the blank default session when no hook launch is pending for
-      // this container's cwd. If a launch is pending, the launchRequests effect
-      // below will add the hook session instead. We still set _autoSpawned so
-      // that once the launch request is consumed (and hasPendingLaunch flips back
-      // to false), this block does not fire again and add a spurious blank session.
-      if (!hasPendingLaunch) {
+      // this container's cwd, and no hook sessions have already been added (e.g. when
+      // the launch requests effect ran in the same Svelte batch before this one did).
+      // This covers both the synchronous case (hasPendingLaunch) and the case where hooks
+      // arrived and were processed slightly ahead of this effect firing.
+      if (!hasPendingLaunch && sessions.length === 0) {
         addSession(defaultShell);
       }
     }
@@ -121,37 +148,72 @@
     shell: string,
     labelOverride?: string,
     initialCommand?: string,
+    envVars?: Record<string, string>,
     autoCloseOnExit = false,
-    hookId?: string
+    hookId?: string,
+    autoFocusWhenReady = false
   ) {
     const count = sessions.filter(s => s.shell === shell).length;
     const fallbackLabel = count === 0 ? shell : `${shell} (${count + 1})`;
     const label = labelOverride?.trim() || fallbackLabel;
     const id = newId();
-    sessions = [...sessions, { id, shell, label, initialCommand, autoCloseOnExit, hookId }];
+    sessions = [
+      ...sessions,
+      { id, shell, label, initialCommand, envVars, autoCloseOnExit, hookId },
+    ];
     activeId = id;
+    if (autoFocusWhenReady) {
+      pendingReadyFocusId = id;
+    }
     showAddMenu = false;
+  }
+
+  function getDefaultShell(): string | null {
+    const preferredShell = defaultShell.trim();
+    if (preferredShell) return preferredShell;
+    const fallbackShell = availableShells[0]?.trim();
+    return fallbackShell ? fallbackShell : null;
+  }
+
+  function addDefaultSession() {
+    const shell = getDefaultShell();
+    if (!shell) return;
+    addSession(shell, undefined, undefined, undefined, false, undefined, true);
   }
 
   $effect(() => {
     const pending = launchRequests.filter(r => r.cwd === cwd && !processedLaunchIds.has(r.id));
     if (pending.length === 0) return;
 
+    const existingHookSessions = sessions.filter(session => Boolean(session.hookId)).length;
+    const incomingHookSessions = pending.filter(req => Boolean(req.hookId)).length;
+    const shouldDefaultToGrid =
+      layout === 'tabs' && existingHookSessions + incomingHookSessions > 1;
+
     _autoSpawned = true;
     for (const req of pending) {
       processedLaunchIds.add(req.id);
-      addSession(req.shell, req.label, req.command, !req.keepOpenOnCompletion, req.hookId);
+      addSession(
+        req.shell,
+        req.label,
+        req.command,
+        req.envVars,
+        !req.keepOpenOnCompletion,
+        req.hookId
+      );
+    }
+
+    if (shouldDefaultToGrid) {
+      layout = 'grid';
     }
   });
 
-  $effect(() => {
-    if (!forcedLayout) return;
-    if (layout !== forcedLayout) {
-      layout = forcedLayout;
+  async function closeSession(id: string) {
+    const session = sessions.find(s => s.id === id);
+    if (session?.ptyId) {
+      await closeTerminal(session.ptyId).catch(() => {});
     }
-  });
 
-  function closeSession(id: string) {
     const idx = sessions.findIndex(s => s.id === id);
     sessions = sessions.filter(s => s.id !== id);
     delete panelInstances[id];
@@ -159,11 +221,22 @@
     if (activeId === id) {
       activeId = sessions[Math.max(0, idx - 1)]?.id ?? sessions[0]?.id ?? null;
     }
+
+    if (sessions.length === 0) {
+      clearTerminalContainerCache(cwd);
+    }
   }
 
-  function closeToRight(id: string) {
+  async function closeToRight(id: string) {
     const idx = sessions.findIndex(s => s.id === id);
-    const toRemove = new Set(sessions.slice(idx + 1).map(s => s.id));
+    const sessionsToRemove = sessions.slice(idx + 1);
+    for (const session of sessionsToRemove) {
+      if (session.ptyId) {
+        await closeTerminal(session.ptyId).catch(() => {});
+      }
+    }
+
+    const toRemove = new Set(sessionsToRemove.map(s => s.id));
     for (const sessionId of toRemove) {
       delete panelInstances[sessionId];
       delete tabButtons[sessionId];
@@ -196,14 +269,18 @@
       { separator: true },
       {
         label: 'Close',
-        action: () => closeSession(sessionId),
+        action: () => {
+          void closeSession(sessionId);
+        },
         danger: true,
       },
     ];
     if (idx < sessions.length - 1) {
       items.push({
         label: 'Close to right',
-        action: () => closeToRight(sessionId),
+        action: () => {
+          void closeToRight(sessionId);
+        },
         danger: true,
       });
     }
@@ -258,6 +335,15 @@
   function onTabPointerDown(e: PointerEvent, id: string) {
     if (interactionLocked) return;
     if (e.button !== 0) return;
+    // Keep keyboard focus out of the tab button so terminal input remains hot.
+    e.preventDefault();
+    // Activate on pointer down so tab switching still works if click is
+    // cancelled by drag pointer handling in the embedded webview.
+    activeId = id;
+    tick().then(() => {
+      panelInstances[id]?.refit();
+      panelInstances[id]?.focus();
+    });
     dragFromId = id;
     dragPointerId = e.pointerId;
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -458,6 +544,10 @@
               onclick={e => {
                 e.stopPropagation();
                 activeId = session.id;
+                tick().then(() => {
+                  panelInstances[session.id]?.refit();
+                  panelInstances[session.id]?.focus();
+                });
               }}
               class="select-none flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium transition-colors
                 {isActive ? 'text-[var(--sg-primary)]' : 'text-[var(--sg-text)]'}"
@@ -478,7 +568,7 @@
             onclick={e => {
               e.stopPropagation();
               if (interactionLocked) return;
-              closeSession(session.id);
+              void closeSession(session.id);
             }}
             title="Close {session.label}"
             class="select-none flex items-center px-1.5 text-[11px] leading-none text-[var(--sg-text-dim)] transition-colors hover:text-[var(--sg-danger)] disabled:cursor-not-allowed disabled:opacity-40"
@@ -495,22 +585,20 @@
       {/each}
     </div>
 
-    <!-- Add terminal button + shell picker -->
-    <div class="relative shrink-0">
+    <!-- Add terminal button -->
+    <div
+      class="relative inline-flex shrink-0 items-stretch rounded bg-[var(--sg-bg)]"
+    >
       <button
         data-testid="btn-add-terminal"
         disabled={interactionLocked}
         onclick={e => {
           e.stopPropagation();
           if (interactionLocked) return;
-          if (availableShells.length <= 1) {
-            addSession(defaultShell);
-          } else {
-            showAddMenu = !showAddMenu;
-          }
+          addDefaultSession();
         }}
-        title="New terminal"
-        class="flex items-center gap-0.5 rounded px-2 py-1 text-[var(--sg-text-faint)] transition-colors hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text-dim)] disabled:cursor-not-allowed disabled:opacity-50"
+        title="New terminal (default shell)"
+        class="flex items-center rounded-l px-2 py-1 text-[var(--sg-text-faint)] transition-colors hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text-dim)] disabled:cursor-not-allowed disabled:opacity-50"
       >
         <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
           <path
@@ -520,21 +608,33 @@
             stroke-linecap="round"
           />
         </svg>
-        {#if availableShells.length > 1}
-          <svg width="8" height="8" viewBox="0 0 8 8" fill="none" class="opacity-60">
-            <path
-              d="M1 2.5l3 3 3-3"
-              stroke="currentColor"
-              stroke-width="1.2"
-              stroke-linecap="round"
-            />
-          </svg>
-        {/if}
+      </button>
+
+      <!-- Shell picker toggle -->
+      <button
+        data-testid="btn-terminal-shell-picker"
+        disabled={interactionLocked || availableShells.length === 0}
+        onclick={e => {
+          e.stopPropagation();
+          if (interactionLocked || availableShells.length === 0) return;
+          showAddMenu = !showAddMenu;
+        }}
+        title="Choose shell"
+        class="flex items-center rounded-r px-1.5 py-1 text-[var(--sg-text-faint)] transition-colors hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text-dim)] disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        <svg width="8" height="8" viewBox="0 0 8 8" fill="none" class="opacity-80">
+          <path
+            d="M1 2.5l3 3 3-3"
+            stroke="currentColor"
+            stroke-width="1.2"
+            stroke-linecap="round"
+          />
+        </svg>
       </button>
 
       {#if showAddMenu}
         <div
-          class="absolute top-full right-0 z-50 mt-0.5 min-w-[110px] overflow-hidden rounded-md border border-[var(--sg-border)] bg-[var(--sg-surface)] py-1 shadow-xl"
+          class="absolute top-full right-0 z-50 mt-1 min-w-[110px] overflow-hidden rounded-md border border-[var(--sg-border)] bg-[var(--sg-surface)] py-1 shadow-xl"
           style="animation: sg-fade-in 0.1s ease-out"
         >
           {#each availableShells as shell}
@@ -542,7 +642,7 @@
               data-testid="terminal-shell-option"
               onclick={e => {
                 e.stopPropagation();
-                addSession(shell);
+                addSession(shell, undefined, undefined, undefined, false, undefined, true);
               }}
               class="block w-full px-3 py-1.5 text-left font-mono text-xs text-[var(--sg-text-dim)] hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text)]"
               >{shell}</button
@@ -558,9 +658,9 @@
     <!-- Layout toggles -->
     <div class="flex shrink-0 items-center gap-0.5 py-0.5">
       <button
-        disabled={Boolean(forcedLayout) || interactionLocked}
+        disabled={interactionLocked}
         onclick={() => {
-          if (forcedLayout || interactionLocked) return;
+          if (interactionLocked) return;
           layout = 'tabs';
         }}
         title="Tabbed (one at a time)"
@@ -569,19 +669,13 @@
           : 'text-[var(--sg-text-faint)] hover:bg-[var(--sg-surface-raised)] hover:text-[var(--sg-text-dim)]'} disabled:cursor-not-allowed disabled:opacity-50"
       >
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-          <rect x="1" y="5" width="12" height="8" rx="1" stroke="currentColor" stroke-width="1.2" />
-          <path
-            d="M1 5h3v-2a1 1 0 011-1h0a1 1 0 011 1v2"
-            stroke="currentColor"
-            stroke-width="1.2"
-            stroke-linejoin="round"
-          />
+            <rect x="1" y="1.5" width="12" height="11" rx="1" stroke="currentColor" stroke-width="1.2" />
         </svg>
       </button>
       <button
-        disabled={Boolean(forcedLayout) || interactionLocked}
+        disabled={interactionLocked}
         onclick={() => {
-          if (forcedLayout || interactionLocked) return;
+          if (interactionLocked) return;
           layout = 'split';
         }}
         title="Split (side by side)"
@@ -611,9 +705,9 @@
         </svg>
       </button>
       <button
-        disabled={Boolean(forcedLayout) || interactionLocked}
+        disabled={interactionLocked}
         onclick={() => {
-          if (forcedLayout || interactionLocked) return;
+          if (interactionLocked) return;
           layout = 'grid';
         }}
         title="Grid (2-column)"
@@ -696,10 +790,35 @@
             shell={session.shell}
             {cwd}
             initialCommand={session.initialCommand}
+            envVars={session.envVars}
             locked={interactionLocked}
             autoCloseOnExit={session.autoCloseOnExit}
             hookId={session.hookId}
-            onAutoClosed={() => closeSession(session.id)}
+            existingPtyId={session.ptyId}
+            preserveOnUnmount={true}
+            onPtyReady={ptyId => {
+              const index = sessions.findIndex(item => item.id === session.id);
+              if (index < 0) return;
+              if (sessions[index]?.ptyId === ptyId) return;
+              sessions = sessions.map(item =>
+                item.id === session.id ? { ...item, ptyId } : item
+              );
+            }}
+            onReady={() => {
+              if (activeId !== session.id && pendingReadyFocusId !== session.id) {
+                return;
+              }
+              tick().then(() => {
+                panelInstances[session.id]?.refit();
+                panelInstances[session.id]?.focus();
+                if (pendingReadyFocusId === session.id) {
+                  pendingReadyFocusId = null;
+                }
+              });
+            }}
+            onAutoClosed={() => {
+              void closeSession(session.id);
+            }}
           />
         </div>
       {/each}

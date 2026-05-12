@@ -738,6 +738,31 @@ pub async fn delete_managed_worktree(
             "--force",
         ],
     )?;
+
+    // On Windows, `git worktree remove` can fail with "Permission denied" even
+    // with --force when a file watcher or shell process holds an open handle to
+    // the worktree directory.  If that happens, fall back to Rust's own
+    // directory removal (which uses the same Win32 APIs but retries on transient
+    // sharing violations), then let `git worktree prune` clean up the metadata.
+    #[cfg(target_os = "windows")]
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("Permission denied") || stderr.contains("failed to delete") {
+            if let Err(rm_err) = std::fs::remove_dir_all(&wt_path) {
+                // Both git and Rust failed — surface the original git error.
+                return Err(format!(
+                    "Failed to remove worktree (git: {}; fs: {})",
+                    stderr.trim(),
+                    rm_err
+                ));
+            }
+            // Directory removed; git metadata will be pruned below.
+        } else {
+            ensure_git_success(output, "Failed to remove worktree")?;
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
     ensure_git_success(output, "Failed to remove worktree")?;
 
     // Prune stale worktree metadata regardless of branch deletion.
@@ -758,6 +783,8 @@ pub async fn delete_managed_worktree(
     }
 
     if let Some(workspace_path) = workspace_from_root_repo(&root_repo) {
+        crate::hooks::clear_switch_hook_session_runs_for_worktree(&workspace_path, &wt_path);
+
         if let Err(err) = delete_worktree_provenance(&workspace_path, &wt_path).await {
             eprintln!("Failed to remove worktree provenance: {err}");
         }

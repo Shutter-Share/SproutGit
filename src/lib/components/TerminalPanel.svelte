@@ -21,6 +21,8 @@
     cwd: string;
     /** Optional command block to send once the terminal is ready. */
     initialCommand?: string;
+    /** Optional environment variables for this terminal session. */
+    envVars?: Record<string, string>;
     /** When true, terminal input is disabled and the panel is read-only. */
     locked?: boolean;
     /** When true, close the terminal tab automatically after process exit. */
@@ -32,18 +34,31 @@
      * synchronise on backend state instead of DOM transitions).
      */
     hookId?: string;
+    /** Callback invoked when the terminal is fully initialized and ready for focus. */
+    onReady?: () => void;
+    /** Called when this panel is bound to a PTY id (new spawn or resume). */
+    onPtyReady?: (ptyId: string) => void;
     /** Callback invoked when auto-close is requested after process exit. */
     onAutoClosed?: () => void;
+    /** Existing PTY to reattach to when restoring cached sessions. */
+    existingPtyId?: string;
+    /** Keep the PTY alive when this panel unmounts. */
+    preserveOnUnmount?: boolean;
   };
 
   const {
     shell,
     cwd,
     initialCommand = '',
+    envVars,
     locked = false,
     autoCloseOnExit = false,
     hookId,
+    onReady,
+    onPtyReady,
     onAutoClosed,
+    existingPtyId = '',
+    preserveOnUnmount = false,
   }: Props = $props();
   const isWindows = typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent);
 
@@ -57,7 +72,7 @@
   let ptyId = $state<string | null>(null);
   let closed = $state(false);
   let error = $state<string | null>(null);
-  let sentInitialCommand = $state(false);
+  let sentInitialCommand = $state(Boolean(existingPtyId));
 
   // ── Event cleanup ─────────────────────────────────────────────────────────
   let unlistenOutput: UnlistenFn | null = null;
@@ -116,6 +131,25 @@
     brightCyan: '#94e2d5',
     brightWhite: '#a6adc8',
   };
+
+  async function attachToPty(id: string) {
+    ptyId = id;
+
+    unlistenOutput = await onTerminalOutput(id, data => {
+      term?.write(data);
+    });
+
+    unlistenClosed = await onTerminalClosed(id, () => {
+      closed = true;
+      term?.write('\r\n\x1b[2m[process exited]\x1b[0m\r\n');
+      if (autoCloseOnExit) {
+        onAutoClosed?.();
+      }
+    });
+
+    onPtyReady?.(id);
+    onReady?.();
+  }
 
   async function initTerminal() {
     if (!containerEl) return;
@@ -198,34 +232,35 @@
     });
     resizeObserver.observe(containerEl);
 
-    // Spawn the shell
     try {
-      // When autoCloseOnExit is enabled, spawn non-interactively so the process
-      // exits naturally when the script completes.  This avoids the PTY-input
-      // timing race on Windows ConPTY (where `exit` sent via PTY may never be
-      // processed if the ConPTY output buffer isn't fully drained first).
+      const resumePtyId = existingPtyId.trim();
+      if (resumePtyId) {
+        await attachToPty(resumePtyId);
+        return;
+      }
+
+      // Spawn the shell
+      // Keep-open hook terminals should stay interactive (PTY mode) so tools
+      // like `copilot` can remain attached. Auto-close sessions still use
+      // non-interactive command mode for deterministic completion.
       const nonInteractiveCmd = autoCloseOnExit && initialCommand.trim() ? initialCommand : null;
 
-      const id = await spawnTerminal(shell, cwd, term.cols, term.rows, nonInteractiveCmd, hookId);
+      const id = await spawnTerminal(
+        shell,
+        cwd,
+        term.cols,
+        term.rows,
+        nonInteractiveCmd,
+        hookId,
+        envVars
+      );
 
       // If we passed the script as a shell argument, mark it sent so the PTY-
       // input $effect below doesn't double-submit it.
       if (nonInteractiveCmd) {
         sentInitialCommand = true;
       }
-      ptyId = id;
-
-      unlistenOutput = await onTerminalOutput(id, data => {
-        term?.write(data);
-      });
-
-      unlistenClosed = await onTerminalClosed(id, () => {
-        closed = true;
-        term?.write('\r\n\x1b[2m[process exited]\x1b[0m\r\n');
-        if (autoCloseOnExit) {
-          onAutoClosed?.();
-        }
-      });
+      await attachToPty(id);
     } catch (err) {
       error = String(err);
     }
@@ -251,7 +286,7 @@
     unlistenClosed?.();
     unlistenClosed = null;
 
-    if (ptyId) {
+    if (ptyId && !preserveOnUnmount) {
       await closeTerminal(ptyId).catch(() => {});
       ptyId = null;
     }
@@ -266,13 +301,36 @@
     void initTerminal();
   });
 
+  async function sendInitialCommandWithRetry(pty: string, command: string) {
+    const maxAttempts = 4;
+    const enterKey = isWindows ? '\r' : '\n';
+    const normalizedCommand = isWindows ? command.replace(/\n/g, '\r') : command;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        await terminalInput(pty, `${normalizedCommand}${enterKey}`);
+        return;
+      } catch (err) {
+        if (attempt === maxAttempts) {
+          throw err;
+        }
+        // ConPTY can lag briefly while the child shell finishes startup.
+        await new Promise(resolveDelay => setTimeout(resolveDelay, 80 * attempt));
+      }
+    }
+  }
+
   $effect(() => {
     if (!ptyId || sentInitialCommand || !initialCommand.trim()) {
       return;
     }
 
     sentInitialCommand = true;
-    void terminalInput(ptyId, `${initialCommand}\r`);
+    void sendInitialCommandWithRetry(ptyId, initialCommand).catch(err => {
+      const msg = `Failed to send startup command: ${String(err)}`;
+      term?.write(`\r\n\x1b[31m${msg}\x1b[0m\r\n`);
+      error = msg;
+    });
   });
 
   onDestroy(() => {
@@ -329,7 +387,7 @@
     ></div>
 
     {#if locked}
-      <div class="absolute inset-0 z-10 bg-black/10"></div>
+      <div class="pointer-events-none absolute inset-0 z-10 bg-black/10"></div>
       <div
         class="pointer-events-none absolute right-3 top-3 rounded border border-[var(--sg-warning)]/35 bg-[var(--sg-warning)]/10 px-2 py-1 text-[10px] text-[var(--sg-warning)]"
       >

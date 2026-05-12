@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -9,7 +9,7 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize}
 use tauri::{AppHandle, Emitter};
 
 use crate::git::helpers::{
-    command_exists, shell_candidates_for_current_os, validate_no_control_chars,
+    command_exists, shell_candidates_for_current_os, strip_win_prefix, validate_no_control_chars,
 };
 
 // ── Shell detection ──────────────────────────────────────────────────────────
@@ -41,6 +41,11 @@ struct PtySession {
     /// CTRL_CLOSE_EVENT.  On Windows, PowerShell can take several seconds to
     /// handle that event; an explicit kill is unconditional and instant.
     child: Mutex<Box<dyn Child + Send + Sync>>,
+    /// The initial working directory the shell was spawned in.  On Windows,
+    /// live shell processes hold a CWD directory handle that blocks `rmdir`.
+    /// Stored here so `close_terminals_for_path` can target just the sessions
+    /// whose initial CWD is inside the worktree being deleted.
+    initial_cwd: PathBuf,
 }
 
 pub struct TerminalManager {
@@ -109,6 +114,34 @@ fn validate_shell_for_terminal(shell: &str) -> Result<String, String> {
     Ok(s)
 }
 
+fn normalize_session_cwd(cwd_path: &Path) -> PathBuf {
+    cwd_path
+        .canonicalize()
+        .map(strip_win_prefix)
+        .unwrap_or_else(|_| cwd_path.to_path_buf())
+}
+
+fn validate_spawn_env_vars(
+    env_vars: Option<HashMap<String, String>>,
+) -> Result<HashMap<String, String>, String> {
+    let mut validated = HashMap::new();
+
+    for (key, value) in env_vars.unwrap_or_default() {
+        let trimmed_key = key.trim().to_string();
+        if trimmed_key.is_empty() {
+            return Err("Environment variable name is required".to_string());
+        }
+        if trimmed_key.contains('=') {
+            return Err(format!("Invalid environment variable name: {trimmed_key}"));
+        }
+        validate_no_control_chars(&trimmed_key, "Environment variable name")?;
+        validate_no_control_chars(&value, "Environment variable value")?;
+        validated.insert(trimmed_key, value);
+    }
+
+    Ok(validated)
+}
+
 // ── Tauri commands ────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -144,8 +177,10 @@ pub async fn spawn_terminal(
     rows: u16,
     command: Option<String>,
     hook_id: Option<String>,
+    env_vars: Option<HashMap<String, String>>,
 ) -> Result<String, String> {
     let shell = validate_shell_for_terminal(&shell)?;
+    let spawn_env_vars = validate_spawn_env_vars(env_vars)?;
 
     let validated_hook_id = match hook_id {
         Some(raw) => {
@@ -181,6 +216,7 @@ pub async fn spawn_terminal(
         let mut proc_cmd = std::process::Command::new(&shell);
         proc_cmd.current_dir(&cwd_path);
         proc_cmd.env("GIT_TERMINAL_PROMPT", "0");
+        proc_cmd.envs(spawn_env_vars.iter().map(|(k, v)| (k.as_str(), v.as_str())));
         proc_cmd.stdout(Stdio::piped());
         proc_cmd.stderr(Stdio::piped());
 
@@ -299,6 +335,9 @@ pub async fn spawn_terminal(
 
     // Set GIT_TERMINAL_PROMPT=0 so git doesn't hang waiting for interactive input
     cmd.env("GIT_TERMINAL_PROMPT", "0");
+    for (key, value) in &spawn_env_vars {
+        cmd.env(key, value);
+    }
 
     let child = pair
         .slave
@@ -319,6 +358,7 @@ pub async fn spawn_terminal(
         master: Mutex::new(pair.master),
         writer: Mutex::new(writer),
         child: Mutex::new(child),
+        initial_cwd: normalize_session_cwd(&cwd_path),
     });
 
     {
@@ -476,6 +516,49 @@ pub async fn close_all_terminals(state: tauri::State<'_, TerminalManager>) -> Re
     // monitoring, but their child processes are owned by wait-threads and
     // cannot be directly killed from here. The E2E fixture cleanup grace
     // period (500ms) allows those threads to naturally exit and release handles.
+
+    Ok(())
+}
+
+/// Kill all PTY sessions whose initial working directory is inside `path`.
+///
+/// Called before deleting a worktree on Windows: live shell processes hold a
+/// CWD directory handle that prevents `git worktree remove` (and any fallback
+/// `fs::remove_dir_all`) from deleting the worktree directory.  Killing only
+/// the sessions rooted in the target path avoids disrupting terminals that are
+/// open in other worktrees.
+#[tauri::command]
+pub async fn close_terminals_for_path(
+    state: tauri::State<'_, TerminalManager>,
+    path: String,
+) -> Result<(), String> {
+    use crate::git::helpers::normalize_existing_path;
+
+    let target = match normalize_existing_path(&path) {
+        Ok(p) => p,
+        // If the path doesn't exist yet (already partially deleted), match
+        // canonically-normalised prefix instead.
+        Err(_) => std::path::PathBuf::from(path.trim()),
+    };
+
+    let mut sessions = state
+        .sessions
+        .lock()
+        .map_err(|_| "Failed to lock terminal sessions".to_string())?;
+
+    let to_kill: Vec<String> = sessions
+        .iter()
+        .filter(|(_, s)| s.initial_cwd.starts_with(&target))
+        .map(|(id, _)| id.clone())
+        .collect();
+
+    for id in &to_kill {
+        if let Some(session) = sessions.remove(id) {
+            if let Ok(mut child) = session.child.lock() {
+                let _ = child.kill();
+            }
+        }
+    }
 
     Ok(())
 }

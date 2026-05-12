@@ -564,15 +564,11 @@ test.describe('Daily developer workflow', () => {
     // emitted — the shell script runs asynchronously afterward.  Waiting for a
     // filesystem artifact (the output file) is therefore inherently racy.
     // Instead, assert on the UI state that appears synchronously:
-    //   1. The hook-operation-header confirms hooks were triggered.
-    //   2. The terminal session tab confirms the terminal_tab launch request
-    //      was handled by the frontend.
-    const hookHeader = tauriPage.getByTestId('hook-operation-header');
-    await hookHeader.waitFor(DEFAULT_UI_TIMEOUT);
-    await expect(hookHeader).toBeVisible();
+    // the terminal session tab confirms the terminal_tab launch request
+    // was handled by the frontend.
 
     const sessionTab = tauriPage.locator(
-      `[data-testid="terminal-session-tab"][data-session-label^="${hookName} ("]`
+      `[data-testid="terminal-session-tab"][data-session-label="${hookName}"]`
     );
     await sessionTab.waitFor(DEFAULT_UI_TIMEOUT);
     await expect(sessionTab).toBeVisible();
@@ -677,15 +673,11 @@ test.describe('Daily developer workflow', () => {
     const targetBranch = 'feature/multi-hooks';
     await createWorktreeViaUi(tauriPage, targetBranch);
 
-    const hookHeader = tauriPage.getByTestId('hook-operation-header');
-    await hookHeader.waitFor(DEFAULT_UI_TIMEOUT);
-    await expect(hookHeader).toBeVisible();
-
     const firstSessionTab = tauriPage.locator(
-      `[data-testid="terminal-session-tab"][data-session-label^="${firstHookName} ("]`
+      `[data-testid="terminal-session-tab"][data-session-label="${firstHookName}"]`
     );
     const secondSessionTab = tauriPage.locator(
-      `[data-testid="terminal-session-tab"][data-session-label^="${secondHookName} ("]`
+      `[data-testid="terminal-session-tab"][data-session-label="${secondHookName}"]`
     );
 
     await firstSessionTab.waitFor(DEFAULT_UI_TIMEOUT);
@@ -764,10 +756,10 @@ test.describe('Daily developer workflow', () => {
     await createWorktreeViaUi(tauriPage, targetBranch);
 
     const autoCloseSessionTab = tauriPage.locator(
-      `[data-testid="terminal-session-tab"][data-session-label^="${autoCloseHookName} ("]`
+      `[data-testid="terminal-session-tab"][data-session-label="${autoCloseHookName}"]`
     );
     const keepOpenSessionTab = tauriPage.locator(
-      `[data-testid="terminal-session-tab"][data-session-label^="${keepOpenHookName} ("]`
+      `[data-testid="terminal-session-tab"][data-session-label="${keepOpenHookName}"]`
     );
 
     // ── Why this test races and how we synchronise on it ──────────────────────

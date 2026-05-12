@@ -349,7 +349,16 @@ pub async fn open_in_editor(worktree_path: String) -> Result<String, String> {
     cmd.spawn()
         .map_err(|e| format!("Failed to open editor '{}': {e}", parts[0]))?;
 
-    Ok(editor)
+    // Return a friendly display name: check known editors first, then fall back
+    // to just the bare command name (strips flags like --wait from the label).
+    let cmd_name = parts[0].as_str();
+    let display = known_editors()
+        .into_iter()
+        .find(|e| e.command == cmd_name || e.mac_bundle_bin == Some(cmd_name))
+        .map(|e| e.name.to_string())
+        .unwrap_or_else(|| cmd_name.to_string());
+
+    Ok(display)
 }
 
 #[tauri::command]

@@ -48,6 +48,12 @@ static WORKSPACE_MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
         M::up(include_str!(
             "../migrations/workspace/005_hooks_terminal_tab_only.sql"
         )),
+        M::up(include_str!(
+            "../migrations/workspace/006_hook_switch_once_per_session.sql"
+        )),
+        M::up(include_str!(
+            "../migrations/workspace/007_hook_switch_auto_run_contexts.sql"
+        )),
     ])
 });
 

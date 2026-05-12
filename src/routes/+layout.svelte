@@ -55,6 +55,60 @@
   onMount(() => {
     const root = document.documentElement;
 
+    const textLikeInputSelector =
+      'input:not([type="button"]):not([type="checkbox"]):not([type="color"]):not([type="file"]):not([type="hidden"]):not([type="image"]):not([type="radio"]):not([type="range"]):not([type="reset"]):not([type="submit"])';
+
+    const disableAutocompleteFor = (element: Element | null) => {
+      if (!(element instanceof HTMLElement)) return;
+
+      if (element instanceof HTMLFormElement) {
+        if (element.getAttribute('autocomplete') !== 'off') {
+          element.setAttribute('autocomplete', 'off');
+        }
+      }
+
+      if (
+        element instanceof HTMLTextAreaElement ||
+        (element instanceof HTMLInputElement && element.matches(textLikeInputSelector))
+      ) {
+        if (element.getAttribute('autocomplete') !== 'off') {
+          element.setAttribute('autocomplete', 'off');
+        }
+      }
+    };
+
+    const applyAutocompletePolicy = (scope: ParentNode) => {
+      if (scope instanceof Element || scope instanceof Document || scope instanceof DocumentFragment) {
+        if (scope instanceof Element) {
+          disableAutocompleteFor(scope);
+        }
+
+        scope
+          .querySelectorAll(`form, textarea, ${textLikeInputSelector}`)
+          .forEach(disableAutocompleteFor);
+      }
+    };
+
+    applyAutocompletePolicy(document);
+
+    const onFocusIn = (event: FocusEvent) => {
+      disableAutocompleteFor(event.target as Element | null);
+      const target = event.target as HTMLElement | null;
+      disableAutocompleteFor(target?.closest('form') ?? null);
+    };
+    document.addEventListener('focusin', onFocusIn);
+
+    const mutationObserver = new MutationObserver(mutations => {
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) {
+          if (node instanceof Element) {
+            applyAutocompletePolicy(node);
+          }
+        }
+      }
+    });
+    mutationObserver.observe(document.body, { childList: true, subtree: true });
+
     async function syncFullscreenClass() {
       try {
         const { getCurrentWindow } = await import('@tauri-apps/api/window');
@@ -114,6 +168,8 @@
     window.addEventListener('contextmenu', onContextMenu);
 
     return () => {
+      mutationObserver.disconnect();
+      document.removeEventListener('focusin', onFocusIn);
       window.removeEventListener('contextmenu', onContextMenu);
       unlistenWindowResize?.();
       unlistenWindowResize = undefined;
