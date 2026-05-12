@@ -626,8 +626,7 @@ fn compose_terminal_command(shell: &str, script: &str, exit_after: bool) -> Stri
     if matches!(shell, "pwsh" | "powershell") {
         if exit_after {
             // Non-interactive: semicolon-joined for -NonInteractive -Command.
-            let script_for_command = script.replace('\n', "; ");
-            script_for_command
+            script.replace('\n', "; ")
         } else {
             // PTY-input: CR as line terminator in interactive mode.
             script.replace('\n', "\r")
