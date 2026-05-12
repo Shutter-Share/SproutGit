@@ -1554,7 +1554,8 @@
     }
 
     // Ensure the shared terminal dock tracks this worktree path.
-    if (!terminalInitializedPaths.has(cwd)) {
+    const hasInitializedPath = [...terminalInitializedPaths].some(path => pathsEqual(path, cwd));
+    if (!hasInitializedPath) {
       terminalInitializedPaths = new Set([...terminalInitializedPaths, cwd]);
     }
 
@@ -1745,6 +1746,7 @@
         worktreeChangeCounts = remainingChangeCounts;
 
         const deletingActiveWorktree = !!activeWorktreePath && pathsEqual(activeWorktreePath, wt.path);
+        const activeWorktreePathBeforeDelete = activeWorktreePath;
         const shouldRunDeleteSwitchHooks = deletingActiveWorktree && !!nextWorktreePath;
         const operationTriggers: WorkspaceHookTrigger[] = shouldRunDeleteSwitchHooks
           ? [
@@ -1777,14 +1779,19 @@
             await runWorktreeSwitchHooks(
               workspace!.workspacePath,
               nextWorktreePath,
-              activeWorktreePath ?? null,
+              activeWorktreePathBeforeDelete ?? null,
               'delete'
             );
           }
 
           clearTerminalStateForPath(wt.path);
           await closeTerminalsForPath(wt.path);
-          await deleteManagedWorktree(workspace!.rootPath, wt.path, true, activeWorktreePath);
+          await deleteManagedWorktree(
+            workspace!.rootPath,
+            wt.path,
+            true,
+            activeWorktreePathBeforeDelete
+          );
           toast.success(`Deleted worktree: ${label}`);
           try {
             await refreshWorkspaceData();

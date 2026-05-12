@@ -1,3 +1,5 @@
+import { pathKey } from '$lib/path-utils';
+
 type CachedSession = {
   id: string;
   shell: string;
@@ -38,13 +40,13 @@ function cloneState(state: CachedContainerState): CachedContainerState {
 }
 
 export function getTerminalContainerCache(cwd: string): CachedContainerState {
-  return cloneState(cacheByCwd.get(cwd) ?? EMPTY_STATE);
+  return cloneState(cacheByCwd.get(pathKey(cwd)) ?? EMPTY_STATE);
 }
 
 export function setTerminalContainerCache(cwd: string, nextState: CachedContainerState) {
-  cacheByCwd.set(cwd, cloneState(nextState));
+  cacheByCwd.set(pathKey(cwd), cloneState(nextState));
 }
 
 export function clearTerminalContainerCache(cwd: string) {
-  cacheByCwd.delete(cwd);
+  cacheByCwd.delete(pathKey(cwd));
 }

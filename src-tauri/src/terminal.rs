@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -9,7 +9,7 @@ use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize}
 use tauri::{AppHandle, Emitter};
 
 use crate::git::helpers::{
-    command_exists, shell_candidates_for_current_os, validate_no_control_chars,
+    command_exists, shell_candidates_for_current_os, strip_win_prefix, validate_no_control_chars,
 };
 
 // ── Shell detection ──────────────────────────────────────────────────────────
@@ -112,6 +112,13 @@ fn validate_shell_for_terminal(shell: &str) -> Result<String, String> {
         ));
     }
     Ok(s)
+}
+
+fn normalize_session_cwd(cwd_path: &Path) -> PathBuf {
+    cwd_path
+        .canonicalize()
+        .map(strip_win_prefix)
+        .unwrap_or_else(|_| cwd_path.to_path_buf())
 }
 
 fn validate_spawn_env_vars(
@@ -351,7 +358,7 @@ pub async fn spawn_terminal(
         master: Mutex::new(pair.master),
         writer: Mutex::new(writer),
         child: Mutex::new(child),
-        initial_cwd: cwd_path.clone(),
+        initial_cwd: normalize_session_cwd(&cwd_path),
     });
 
     {

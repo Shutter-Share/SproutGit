@@ -6,6 +6,7 @@
     getTerminalShellOptions,
     getWorkspaceTerminalSnapshots,
   } from '$lib/workspace-terminals.svelte';
+  import { pathsEqual } from '$lib/path-utils';
 
   const terminalRouteActive = $derived($page.url.pathname.startsWith('/workspace'));
   const activeWorkspacePath = $derived(getActiveWorkspacePath());
@@ -15,7 +16,7 @@
     terminalRouteActive
       ? workspaceSnapshots.find(
           snapshot =>
-            snapshot.workspacePath === activeWorkspacePath &&
+            pathsEqual(snapshot.workspacePath, activeWorkspacePath) &&
             snapshot.activeTab === 'terminal' &&
             snapshot.initializedPaths.length > 0
         ) ?? null
@@ -23,7 +24,7 @@
   );
 
   function getSnapshotStyles(workspacePath: string, activeWorkspacePath: string | null) {
-    return activeTerminalSnapshot && activeWorkspacePath === workspacePath ? 'flex' : 'none';
+    return activeTerminalSnapshot && pathsEqual(activeWorkspacePath, workspacePath) ? 'flex' : 'none';
   }
 </script>
 
@@ -39,7 +40,7 @@
       {#each workspaceState.initializedPaths as wtPath (wtPath)}
         <div
           class="flex min-h-0 flex-1 flex-col overflow-hidden"
-          style:display={workspaceState.activeTerminalPath === wtPath ? 'flex' : 'none'}
+          style:display={pathsEqual(workspaceState.activeTerminalPath, wtPath) ? 'flex' : 'none'}
         >
           <TerminalContainer
             defaultShell={shellOptions.defaultShell}

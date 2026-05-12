@@ -2085,8 +2085,14 @@ pub async fn run_worktree_switch_hooks(
 
 #[cfg(test)]
 mod tests {
-    use super::{ensure_dependency_triggers_compatible, normalize_hook_script};
+    use super::{
+        build_switch_hook_session_key, ensure_dependency_triggers_compatible,
+        mark_switch_hook_ran_this_session, normalize_hook_script, normalize_switch_auto_run_flags,
+        parse_switch_hook_source, should_skip_switch_hook_once_per_session,
+        validate_switch_once_per_session, HookExecutionContext, RuntimeHook, SWITCH_HOOK_SESSION_RUNS,
+    };
     use std::collections::HashMap;
+    use std::path::PathBuf;
 
     #[test]
     fn normalize_hook_script_allows_multiline_scripts() {
@@ -2134,6 +2140,99 @@ mod tests {
         ) {
             Ok(_) => {},
             Err(err) => panic!("manual dependency should be allowed: {err}"),
+        }
+    }
+
+    #[test]
+    fn parse_switch_hook_source_defaults_to_manual_when_missing_or_blank() {
+        assert!(matches!(parse_switch_hook_source(None), Ok(super::SwitchHookSource::Manual)));
+        assert!(matches!(
+            parse_switch_hook_source(Some("   ")),
+            Ok(super::SwitchHookSource::Manual)
+        ));
+    }
+
+    #[test]
+    fn parse_switch_hook_source_rejects_unknown_value() {
+        match parse_switch_hook_source(Some("invalid")) {
+            Ok(_) => panic!("invalid source should be rejected"),
+            Err(err) => assert!(err.contains("Unsupported switch hook source")),
+        }
+    }
+
+    #[test]
+    fn validate_switch_once_per_session_allows_only_switch_triggers() {
+        match validate_switch_once_per_session("before_worktree_switch", true) {
+            Ok(value) => assert!(value),
+            Err(err) => panic!("switch trigger should allow once-per-session: {err}"),
+        }
+
+        match validate_switch_once_per_session("before_worktree_create", true) {
+            Ok(_) => panic!("non-switch trigger should reject once-per-session"),
+            Err(err) => assert!(err.contains("switchOncePerSession can only be enabled")),
+        }
+    }
+
+    #[test]
+    fn normalize_switch_auto_run_flags_defaults_for_non_switch_triggers() {
+        assert_eq!(
+            normalize_switch_auto_run_flags("before_worktree_create", false, true),
+            (true, false)
+        );
+        assert_eq!(
+            normalize_switch_auto_run_flags("before_worktree_switch", false, true),
+            (false, true)
+        );
+    }
+
+    #[test]
+    fn switch_once_per_session_marks_and_skips_after_first_run() {
+        if let Ok(mut runs) = SWITCH_HOOK_SESSION_RUNS.lock() {
+            runs.clear();
+        } else {
+            panic!("failed to clear switch hook session runs");
+        }
+
+        let context = HookExecutionContext {
+            workspace_path: PathBuf::from("/tmp/workspace"),
+            trigger_worktree_path: Some(PathBuf::from("/tmp/workspace/worktrees/feature-a")),
+            initiating_worktree_path: None,
+            source_ref: None,
+        };
+        let hook = RuntimeHook {
+            id: "hook-1".to_string(),
+            name: "hook".to_string(),
+            scope: "workspace".to_string(),
+            trigger: "before_worktree_switch".to_string(),
+            execution_target: "trigger_worktree".to_string(),
+            execution_mode: "inline".to_string(),
+            shell: "bash".to_string(),
+            script: "echo hi".to_string(),
+            critical: false,
+            switch_once_per_session: true,
+            keep_open_on_completion: false,
+            timeout_seconds: 60,
+            switch_run_on_create: true,
+            switch_run_on_delete: false,
+        };
+
+        assert!(!should_skip_switch_hook_once_per_session(
+            "before_worktree_switch",
+            &hook,
+            &context
+        ));
+        mark_switch_hook_ran_this_session("before_worktree_switch", &hook.id, &context);
+        assert!(should_skip_switch_hook_once_per_session(
+            "before_worktree_switch",
+            &hook,
+            &context
+        ));
+
+        if let Some(key) = build_switch_hook_session_key("before_worktree_switch", &hook.id, &context)
+        {
+            if let Ok(mut runs) = SWITCH_HOOK_SESSION_RUNS.lock() {
+                runs.remove(&key);
+            }
         }
     }
 }
