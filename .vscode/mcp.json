@@ -1,0 +1,24 @@
+{
+    "inputs": [
+        {
+            "type": "promptString",
+            "id": "electronScreenshotEncryptionKey",
+            "description": "Electron Screenshot Encryption Key",
+            "password": true
+        }
+    ],
+    "servers": {
+        "electron": {
+            "type": "stdio",
+            "command": "npx",
+            "args": [
+                "-y",
+                "electron-mcp-server"
+            ],
+            "env": {
+                "SECURITY_LEVEL": "balanced",
+                "SCREENSHOT_ENCRYPTION_KEY": "${input:electronScreenshotEncryptionKey}"
+            }
+        }
+    }
+}

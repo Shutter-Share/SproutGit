@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "outDir": "./out",
+    "types": ["@wdio/globals/types", "mocha"]
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules", "out"]
+}

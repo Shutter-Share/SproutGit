@@ -301,7 +301,7 @@ const RELEASES_PAGE = `${GITHUB}/releases/latest`;
 
     const assetMatchers = {
       macos: (/** @type {{ name: string }} */ asset) => asset.name.endsWith('.dmg') && /aarch64|arm64/i.test(asset.name),
-      windows: (/** @type {{ name: string }} */ asset) => asset.name.endsWith('.msi'),
+      windows: (/** @type {{ name: string }} */ asset) => asset.name.endsWith('.exe'),
       linux: (/** @type {{ name: string }} */ asset) => asset.name.endsWith('.AppImage'),
     };
 

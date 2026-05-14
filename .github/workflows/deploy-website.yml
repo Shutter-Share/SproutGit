@@ -19,21 +19,18 @@ concurrency:
 
 jobs:
   build:
-    name: '01 · Build Site'
+    name: Build Site
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 10
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
+      - uses: actions/setup-node@v4
         with:
-          node-version: 22.12.0
+          node-version: 22
           cache: pnpm
           cache-dependency-path: website/pnpm-lock.yaml
 
@@ -51,7 +48,7 @@ jobs:
           path: website/dist
 
   deploy:
-    name: '02 · Deploy Pages'
+    name: Deploy Pages
     needs: build
     runs-on: ubuntu-latest
     environment:

@@ -1,0 +1,80 @@
+import { ipcMain, BrowserWindow } from 'electron';
+import { IPC } from '@sproutgit/types';
+import { TerminalManagerWithMeta } from '@sproutgit/terminal';
+
+// Forward PTY output/exit events to the renderer window that created the session.
+const sessionWindows = new Map<string, BrowserWindow>();
+
+const manager = new TerminalManagerWithMeta(
+  (id, data) => {
+    const win = sessionWindows.get(id);
+    if (win && !win.isDestroyed()) {
+      win.webContents.send(IPC.TERMINAL_DATA, { id, data });
+    }
+  },
+  (id) => {
+    const win = sessionWindows.get(id);
+    if (win && !win.isDestroyed()) {
+      win.webContents.send(IPC.TERMINAL_EXIT, { id });
+    }
+    sessionWindows.delete(id);
+  },
+);
+
+export function registerTerminalHandlers(): void {
+  ipcMain.handle(IPC.TERMINAL_CREATE, (_e, args: {
+    cwd: string;
+    shell?: string;
+    label?: string;
+    cols?: number;
+    rows?: number;
+  }) => {
+    const win = BrowserWindow.fromWebContents(_e.sender);
+    const shell = (args.shell ?? 'zsh') as import('@sproutgit/types').WorkspaceHookShell;
+    let id: string;
+    try {
+      id = manager.spawn({
+        cwd: args.cwd,
+        shell,
+        ...(args.label !== undefined && { label: args.label }),
+        ...(args.cols !== undefined && { cols: args.cols }),
+        ...(args.rows !== undefined && { rows: args.rows }),
+      });
+    } catch (error) {
+      const e = error instanceof Error ? error : new Error(String(error));
+      e.message = `[terminal:create] shell=${JSON.stringify(shell)} cwd=${JSON.stringify(args.cwd)} ${e.message}`;
+      throw e;
+    }
+
+    if (win) sessionWindows.set(id, win);
+    return id;
+  });
+
+  ipcMain.handle(IPC.TERMINAL_WRITE, (_e, args: { id: string; data: string }) => {
+    manager.write(args.id, args.data);
+  });
+
+  ipcMain.handle(IPC.TERMINAL_RESIZE, (_e, args: {
+    id: string;
+    cols: number;
+    rows: number;
+  }) => {
+    manager.resize(args.id, args.cols, args.rows);
+  });
+
+  ipcMain.handle(IPC.TERMINAL_CLOSE, (_e, id: string) => {
+    manager.close(id);
+  });
+
+  ipcMain.handle(IPC.TERMINAL_CLOSE_FOR_PATH, (_e, pathPrefix: string) => {
+    manager.closeForPath(pathPrefix);
+  });
+
+  ipcMain.handle(IPC.TERMINAL_CLOSE_ALL, () => {
+    manager.closeAll();
+  });
+
+  ipcMain.handle(IPC.TERMINAL_LIST, () => {
+    return manager.listSessions().map(s => ({ ...s, label: s.label }));
+  });
+}

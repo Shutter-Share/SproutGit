@@ -1,0 +1,286 @@
+/* ==========================================================================
+   SproutGit Global Styles
+   Ported exactly from old/src/app.css — all --sg-* design tokens preserved.
+   ========================================================================== */
+
+/* ── Fonts ── */
+@import '@xterm/xterm/css/xterm.css';
+@import '@fontsource/space-grotesk/400.css';
+@import '@fontsource/space-grotesk/500.css';
+@import '@fontsource/space-grotesk/700.css';
+@import '@fontsource/plus-jakarta-sans/400.css';
+@import '@fontsource/plus-jakarta-sans/500.css';
+@import '@fontsource/plus-jakarta-sans/700.css';
+@import '@fontsource/fira-code/400.css';
+@import '@fontsource/fira-code/500.css';
+
+/* ── Design Tokens (Light mode / default) ── */
+:root {
+  --sg-font-heading: 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    'Helvetica Neue', Arial, sans-serif;
+  --sg-font-body: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    'Helvetica Neue', Arial, sans-serif;
+  --sg-font-code: 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+    'Liberation Mono', 'Courier New', monospace;
+
+  --sg-titlebar-inset-default: 16px;
+  --sg-titlebar-inset: var(--sg-titlebar-inset-default);
+  --sg-titlebar-height: 38px;
+
+  --sg-bg: #f5f5f5;
+  --sg-surface: #ffffff;
+  --sg-surface-raised: #eaeaef;
+  --sg-border: #d4d4dc;
+  --sg-border-subtle: #e0e0e8;
+  --sg-text: #1e1e2e;
+  --sg-text-dim: #555568;
+  --sg-text-faint: #8888a0;
+  --sg-primary: #036837;
+  --sg-primary-hover: #19ac5c;
+  --sg-danger: #c4314b;
+  --sg-warning: #9a6700;
+  --sg-accent: #6ac74c;
+  --sg-avatar-bg: #dff0c4;
+  --sg-avatar-text: #036837;
+  --sg-input-bg: #ffffff;
+  --sg-input-border: #d4d4dc;
+  --sg-input-focus: #036837;
+}
+
+/* macOS: extra left inset for traffic-light buttons */
+.platform-macos {
+  --sg-titlebar-inset: 85px;
+}
+
+/* Native fullscreen: revert to baseline inset */
+.platform-macos.window-fullscreen {
+  --sg-titlebar-inset: var(--sg-titlebar-inset-default);
+}
+
+/* ── Dark mode ── */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --sg-bg: #1e1e2e;
+    --sg-surface: #262637;
+    --sg-surface-raised: #2e2e42;
+    --sg-border: #3a3a52;
+    --sg-border-subtle: #32324a;
+    --sg-text: #cdd6f4;
+    --sg-text-dim: #8b8fad;
+    --sg-text-faint: #6c7086;
+    --sg-primary: #19ac5c;
+    --sg-primary-hover: #6ac74c;
+    --sg-danger: #f38ba8;
+    --sg-warning: #f9e2af;
+    --sg-accent: #92ce36;
+    --sg-avatar-bg: #2b3b35;
+    --sg-avatar-text: #dff0c4;
+    --sg-input-bg: #1a1a2a;
+    --sg-input-border: #3a3a52;
+    --sg-input-focus: #19ac5c;
+  }
+}
+
+/* ── Reset ── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  color: var(--sg-text);
+  background: var(--sg-bg);
+  font-family: var(--sg-font-body);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+select,
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+input,
+select,
+textarea,
+button {
+  font: inherit;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--sg-font-heading);
+}
+
+code, pre, kbd, samp {
+  font-family: var(--sg-font-code);
+  font-variant-ligatures: common-ligatures contextual;
+}
+
+/* ── Scrollbars ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--sg-border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--sg-text-faint); }
+
+.sg-scrollbar-visible {
+  overflow-x: auto !important;
+  scrollbar-width: thin;
+  scrollbar-color: var(--sg-border) var(--sg-surface);
+}
+.sg-scrollbar-visible::-webkit-scrollbar { height: 5px; }
+.sg-scrollbar-visible::-webkit-scrollbar-track { background: var(--sg-surface); }
+.sg-scrollbar-visible::-webkit-scrollbar-thumb { background: var(--sg-border); border-radius: 3px; }
+.sg-scrollbar-visible::-webkit-scrollbar-thumb:hover { background: var(--sg-text-faint); }
+
+/* ── Animations ── */
+@keyframes sg-fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes sg-slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes sg-slide-down {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes sg-toast-in {
+  from { opacity: 0; transform: translateX(-100%); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes sg-spin {
+  to { transform: rotate(360deg); }
+}
+@keyframes sg-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+/* ── Syntax Highlighting — highlight.js token colors ── */
+/* Light */
+.hljs-keyword, .hljs-selector-tag, .hljs-built_in { color: #0b5e3b; font-weight: 600; }
+.hljs-type, .hljs-class .hljs-title               { color: #5c2f99; }
+.hljs-string, .hljs-attr                           { color: #0a5a9c; }
+.hljs-number, .hljs-literal                        { color: #825500; }
+.hljs-comment                                       { color: #556070; font-style: italic; }
+.hljs-function .hljs-title, .hljs-title.function_  { color: #7a2e79; }
+.hljs-variable, .hljs-template-variable            { color: #1f2937; }
+.hljs-meta, .hljs-meta .hljs-keyword              { color: #9f1239; }
+.hljs-tag, .hljs-name                             { color: #0f5132; }
+.hljs-attribute, .hljs-property                   { color: #0a5a9c; }
+.hljs-selector-class, .hljs-selector-id           { color: #5c2f99; }
+
+/* Dark */
+@media (prefers-color-scheme: dark) {
+  .hljs-keyword, .hljs-selector-tag, .hljs-built_in { color: #6dd3a0; font-weight: 600; }
+  .hljs-type, .hljs-class .hljs-title               { color: #c9a6ff; }
+  .hljs-string, .hljs-attr                           { color: #7bc5ff; }
+  .hljs-number, .hljs-literal                        { color: #f2c875; }
+  .hljs-comment                                       { color: #98a2b3; font-style: italic; }
+  .hljs-function .hljs-title, .hljs-title.function_  { color: #f4a7e7; }
+  .hljs-variable, .hljs-template-variable            { color: #e7ecff; }
+  .hljs-meta, .hljs-meta .hljs-keyword              { color: #ff98ad; }
+  .hljs-tag, .hljs-name                             { color: #8be3af; }
+  .hljs-attribute, .hljs-property                   { color: #7bc5ff; }
+  .hljs-selector-class, .hljs-selector-id           { color: #c9a6ff; }
+}
+
+/* ── Spinner ── */
+.sg-spinner { color: var(--sg-primary); display: block; }
+
+/* ── Diff viewer (used by dangerouslySetInnerHTML) ── */
+.sg-diff { margin: 0; overflow-x: auto; font-size: 12px; font-family: var(--sg-font-code); line-height: 1.5; }
+.sg-diff-add  { display: block; background: #dff3e4; color: #0f5132; }
+.sg-diff-del  { display: block; background: #fbe4e8; color: #8a1f35; }
+.sg-diff-hunk { display: block; color: var(--sg-text-faint); background: var(--sg-surface-raised); }
+.sg-diff-ctx  { display: block; color: var(--sg-text-dim); }
+.sg-diff-meta { display: block; color: var(--sg-text-faint); background: var(--sg-surface-raised); }
+.sg-diff-empty { display: block; color: var(--sg-text-faint); padding: 8px; }
+
+/* Diff-aware token colors preserve contrast over add/del backgrounds. */
+.sg-diff-add .hljs-keyword, .sg-diff-add .hljs-selector-tag, .sg-diff-add .hljs-built_in { color: #0d683a; }
+.sg-diff-add .hljs-string, .sg-diff-add .hljs-attr { color: #0a5a9c; }
+.sg-diff-add .hljs-number, .sg-diff-add .hljs-literal { color: #7a4d00; }
+.sg-diff-add .hljs-comment { color: #3c5f4f; }
+
+.sg-diff-del .hljs-keyword, .sg-diff-del .hljs-selector-tag, .sg-diff-del .hljs-built_in { color: #8f1d3e; }
+.sg-diff-del .hljs-string, .sg-diff-del .hljs-attr { color: #7a265a; }
+.sg-diff-del .hljs-number, .sg-diff-del .hljs-literal { color: #7b3f00; }
+.sg-diff-del .hljs-comment { color: #6c4c57; }
+
+@media (prefers-color-scheme: dark) {
+  .sg-diff-add { background: rgba(25, 172, 92, 0.20); color: #8be3af; }
+  .sg-diff-del { background: rgba(196, 49, 75, 0.24); color: #ffb8c6; }
+
+  .sg-diff-add .hljs-keyword, .sg-diff-add .hljs-selector-tag, .sg-diff-add .hljs-built_in { color: #9ae7b9; }
+  .sg-diff-add .hljs-string, .sg-diff-add .hljs-attr { color: #b7dcff; }
+  .sg-diff-add .hljs-number, .sg-diff-add .hljs-literal { color: #f2d18a; }
+  .sg-diff-add .hljs-comment { color: #b3c6bb; }
+
+  .sg-diff-del .hljs-keyword, .sg-diff-del .hljs-selector-tag, .sg-diff-del .hljs-built_in { color: #ffc2cf; }
+  .sg-diff-del .hljs-string, .sg-diff-del .hljs-attr { color: #ffb9ec; }
+  .sg-diff-del .hljs-number, .sg-diff-del .hljs-literal { color: #ffcf9c; }
+  .sg-diff-del .hljs-comment { color: #d4b8bf; }
+}
+
+/* ── Commit graph rows (used by CommitGraph.tsx) ── */
+.commit-row {
+  display: flex; align-items: center; gap: 6px;
+  height: 28px; padding: 0 8px; cursor: pointer;
+  font-size: 12px; overflow: hidden; white-space: nowrap;
+  border-radius: 4px; transition: background 0.05s;
+}
+.commit-row:hover { background: var(--sg-surface-raised); }
+.commit-row--selected { background: rgba(25, 172, 92, 0.12); }
+.commit-row--match { background: rgba(250, 180, 60, 0.12); }
+.commit-row--active-match { background: rgba(250, 180, 60, 0.28); }
+.commit-row-refs { display: flex; gap: 3px; flex-shrink: 0; }
+.commit-ref {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 1px 5px; border-radius: 4px; font-size: 10px; font-weight: 500;
+  background: var(--sg-surface-raised); border: 1px solid var(--sg-border);
+  color: var(--sg-text-dim); cursor: pointer;
+  max-width: 140px; overflow: hidden; text-overflow: ellipsis;
+}
+.commit-ref--worktree { border-color: var(--sg-primary); color: var(--sg-primary); }
+.commit-ref--tag      { border-color: var(--sg-accent); color: var(--sg-accent); }
+.commit-row-subject { flex: 1; overflow: hidden; text-overflow: ellipsis; color: var(--sg-text); }
+.commit-row-meta { flex-shrink: 0; color: var(--sg-text-faint); font-size: 11px; }
+.commit-graph-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--sg-text-faint); font-size: 12px; }
+.commit-graph-search { display: flex; align-items: center; gap: 4px; padding: 4px 8px; background: var(--sg-surface); border-bottom: 1px solid var(--sg-border); font-size: 12px; }
+.commit-graph-search input { flex: 1; background: none; border: none; outline: none; color: var(--sg-text); font-size: 12px; }
+.commit-graph-search-count { color: var(--sg-text-faint); font-size: 11px; }
+.commit-graph-search button { background: none; border: none; cursor: pointer; color: var(--sg-text-faint); padding: 2px; border-radius: 3px; }
+.commit-graph-search button:hover { color: var(--sg-text); }
+.commit-graph-load-more { padding: 8px; text-align: center; color: var(--sg-text-faint); font-size: 12px; }
+
+/* ── Context menu (used by CommitGraph.tsx inline context menu) ── */
+.context-menu {
+  background: var(--sg-surface); border: 1px solid var(--sg-border);
+  border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+  padding: 4px; min-width: 160px; animation: sg-fade-in 0.1s ease;
+}
+.context-menu-item {
+  display: block; width: 100%; padding: 6px 10px; text-align: left;
+  background: none; border: none; border-radius: 5px; font-size: 12px;
+  color: var(--sg-text); cursor: pointer;
+}
+.context-menu-item:hover { background: var(--sg-surface-raised); }
+.context-menu-item--danger { color: var(--sg-danger); }
+.context-menu-separator { height: 1px; background: var(--sg-border-subtle); margin: 4px 0; }
+

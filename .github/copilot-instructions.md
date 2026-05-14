@@ -1,802 +1,337 @@
-# SproutGit — Copilot Instructions
+# SproutGit Copilot Instructions
 
-## Repository
+> These instructions apply to every AI-assisted change in this repository.
 
-- **Owner / GitHub org**: [InterestingSoftware](https://github.com/InterestingSoftware)
-- **Repo URL**: https://github.com/InterestingSoftware/SproutGit.git
+**GitHub:** https://github.com/InterestingSoftware/SproutGit  
+**Owner / org:** InterestingSoftware  
+**Repo:** SproutGit  
+**Clone URL:** https://github.com/InterestingSoftware/SproutGit.git
 
-## What is SproutGit?
+## Project overview
 
-Open-source, cross-platform Git desktop app with a **worktree-first** workflow. The MVP lets users clone/init repos, manage Git worktrees in a prescribed directory layout, view a commit graph, and create branches paired with worktrees.
+SproutGit is an Electron-based, cross-platform Git desktop app with a **worktree-first** workflow.
 
-## Tech Stack
+**Monorepo:** pnpm v11 workspaces + Turborepo v2  
+**Dev command:** `pnpm dev`  
+**Test command:** `pnpm test` (unit) / `pnpm test:e2e` (Playwright E2E)  
+**Typecheck:** `pnpm typecheck`  
+**Lint:** `pnpm lint`
 
-| Layer              | Technology                                                 | Notes                                                        |
-| ------------------ | ---------------------------------------------------------- | ------------------------------------------------------------ |
-| Desktop shell      | **Tauri v2**                                               | Rust backend, webview frontend                               |
-| Frontend framework | **SvelteKit + Svelte 5**                                   | SSR disabled (`ssr = false`), `adapter-static` for SPA       |
-| Language           | **TypeScript** (frontend), **Rust** (backend)              |                                                              |
-| Styling            | **Tailwind CSS v4**                                        | via `@tailwindcss/vite` plugin                               |
-| State (frontend)   | Svelte 5 runes                                             | `$state`, `$derived`, `$derived.by`, `$props`, `$effect`     |
-| State (persistent) | **SQLite** via `rusqlite` (bundled) + `rusqlite_migration` | workspace `state.db` + app-global `config.db`                |
-| Package manager    | **pnpm**                                                   | Tauri hooks use `pnpm run dev` / `pnpm run build`            |
-| Git integration    | CLI-based                                                  | Rust backend shells out to `git` via `std::process::Command` |
+---
 
-## Project Structure
+## Stack & versions
 
-This structure is a high-level orientation map. For file-level accuracy, verify against the current workspace tree before making assumptions.
+| Technology | Version |
+|---|---|
+| Electron | 42 |
+| electron-vite | 5 |
+| electron-builder | 26 |
+| React | 19 |
+| TanStack Router | 1 |
+| Zustand | 5 |
+| Tailwind CSS | 4 (`@tailwindcss/vite`) |
+| TypeScript | 5 |
+| Drizzle ORM | latest |
+| simple-git | latest |
+| node-pty | latest |
+| Playwright | latest |
 
-```
-sproutgit/
-├── src/                          # SvelteKit frontend
-│   ├── app.css                   # Global design tokens (--sg-* CSS vars), animations, light/dark theme
-│   ├── lib/
-│   │   ├── sproutgit.ts          # Typed API layer wrapping Tauri invoke() calls
-│   │   ├── toast.svelte.ts       # Toast notification state (Svelte 5 rune module, no stores)
-│   │   └── components/
-│   │       ├── CommitGraph.svelte # SVG commit graph with lane algorithm, search, context menu, worktree markers
-│   │       ├── Autocomplete.svelte # Filterable dropdown with keyboard nav, aria attributes
-│   │       ├── ContextMenu.svelte  # Right-click context menu, auto-positions within viewport
-│   │       ├── Spinner.svelte      # Animated loading spinner (sm/md/lg)
-│   │       └── ToastContainer.svelte # Fixed-position toast renderer (auto-dismiss, slide animations)
-│   └── routes/
-│       ├── +layout.svelte        # Minimal: imports app.css, renders <slot />
-│       ├── +layout.ts            # export const ssr = false
-│       ├── +page.svelte          # Screen 1: Project picker (clone, open, recent projects)
-│       ├── settings/
-│       │   └── +page.svelte      # Settings screen
-│       └── workspace/
-│           └── +page.svelte      # Screen 2: Workspace (worktree mgmt + commit graph)
-├── src-tauri/
-│   ├── src/
-│   │   ├── lib.rs                # Tauri entry: registers all commands
-│   │   ├── db.rs                 # Database connections + migration runner
-│   │   ├── workspace.rs          # Workspace create/inspect/import commands
-│   │   ├── hooks.rs              # Hook definitions, dependencies, run history
-│   │   ├── git/                  # Git operations, helpers, diff, staging
-│   │   └── ...                   # config, editor, github, terminal, watcher
-│   ├── migrations/
-│   │   ├── workspace/            # Migrations for per-workspace state.db
-│   │   │   └── 001_initial_schema.sql
-│   │   └── config/               # Migrations for app-global config.db
-│   │       └── 001_initial_schema.sql
-│   ├── tauri.conf.json           # App config: window 1200x800, min 900x600, resizable
-│   ├── Cargo.toml                # Rust deps: tauri, rusqlite, rusqlite_migration, sea-orm, …
-│   └── capabilities/default.json # Permissions: core, opener, dialog
-├── docs/
-│   ├── index.md                  # Documentation index; read first to discover relevant docs for a task
-│   ├── requirements.md           # Full MVP requirements with P0/P1 features
-│   └── design-review-and-screen-plan.md  # Screen architecture (8 screens planned)
-└── package.json                  # pnpm scripts: dev, build, check, tauri
-```
+---
 
-## Documentation Index (Required)
-
-The `docs/` folder contains product, architecture, security, and workflow decisions that may be directly relevant to implementation work.
-
-Agent requirements:
-
-- At the start of each new task, read `docs/index.md` first to discover whether any repository docs are relevant.
-- If a linked doc is relevant to the task, read it before making design or implementation decisions.
-- When adding, renaming, removing, or substantially repurposing a document in `docs/`, update `docs/index.md` in the same change.
-- Treat `docs/index.md` as the maintained entry point for the repository documentation set.
-
-## Tauri Playwright Adapter (Required For E2E Changes)
-
-When working on `e2e/**`, adapter fixtures, or Playwright/Tauri bridge behavior, read `docs/tauri-playwright-adapter-cheatsheet.md` before editing.
-
-Key reminders:
-
-- `TauriPage` is Playwright-like but not identical to `Page`.
-- `TauriLocator.waitFor` expects a numeric timeout, not a Playwright options object.
-- Keep plugin socket/port values consistent across setup/launch and worker processes for each run.
-- In `tauri` mode, do not use `page.goto()` for app reset or startup navigation.
-- Prefer per-spec `beforeEach` reset hooks over global Playwright lifecycle hooks for stateful E2E flows.
-- For E2E isolation, reset both the test workspace directory and the isolated config DB, then return to the project picker with stable in-app navigation (`ensureHome()`-style helpers). Avoid making full webview reloads the default reset path for the suite.
-- Current default runtime is headless Playwright in `e2e/playwright.config.ts`; do not switch to headed by default.
-- During reset, clear cached workspace hints (`sg_workspace_hint`) **before** navigating home; the clear must happen before the home page mounts so `onMount` never auto-navigates back to the previous workspace. Do not perform a full `window.location.reload()` — UI-driven navigation already tears down and remounts all page components, and hard reloads cost 20–45 s on slow Windows CI runners.
-- In E2E `beforeEach` hooks, the required reset order is: `resetConfigDb()` → `reloadToHome()` → `resetTestDirs()`. Rationale: (1) `resetConfigDb()` first so the app never queries a deleted schema; the config DB lives in a separate run-scoped directory with no watcher or process holding it open. (2) `reloadToHome()` second so the workspace `onDestroy` fires `closeAllTerminals()` + `stopWatchingWorktrees()` before any filesystem cleanup — PTY children (PowerShell on Windows) hold CWD handles on worktree directories, and watchers hold directory handles. (3) `resetTestDirs()` last, after those handles are released.
-
-### E2E Selector Strategy (Required)
-
-- Prefer `getByTestId(...)` for all E2E element interactions and waits.
-- Use CSS selectors only when no stable test ID exists, and keep those selectors narrow and local.
-- If an interaction depends on visual state (hover-only controls, transient overlays), add or use a dedicated test ID before introducing brittle structural selectors.
-- **If a needed `data-testid` does not exist in the UI source, add it.** Never work around a missing test ID with fragile structural selectors — add the `data-testid` attribute to the component/template and use it in the test.
-
-## E2E Failure Triage Protocol (Required)
-
-When debugging a flaky or platform-specific E2E failure, follow this order exactly.
-
-1. Reproduce locally with the narrowest failing scope (single spec or test name).
-2. Classify the failure as one of: deterministic logic bug, timing/timeout issue, state reset leak, or platform-only behavior.
-3. Validate reset assumptions first (workspace cleanup, config DB reset, `sg_workspace_hint` clear, verified reload).
-4. If Windows-only, inspect path format and shell semantics before raising timeouts.
-5. Apply the smallest fix that addresses root cause; avoid masking deterministic failures with broad timeout increases.
-6. Re-run only the affected spec first, then re-run the required E2E gate.
-
-### Timeout Budget Policy (Required)
-
-- Keep Playwright per-test timeout and helper timeouts aligned; do not change one without auditing the other.
-- For CI reliability updates, document why each timeout changed and which operation consumed the budget.
-- Increase timeouts only when evidence shows slow-environment variance; if failure is deterministic, fix behavior instead.
-- When a timeout is increased, include before/after values in the commit message or PR notes.
-
-## Workspace Layout (User Projects)
-
-SproutGit manages user repos in a prescribed directory layout:
+## Monorepo structure
 
 ```
-<workspace>/
-├── root/                  # Main bare-ish checkout (protected, don't work directly here)
-├── worktrees/             # Managed worktrees created by SproutGit
-│   ├── feature-foo/
-│   └── bugfix-bar/
-└── .sproutgit/            # SproutGit metadata
-    └── state.db           # SQLite: workspace state (meta, hooks, sessions)
+app/                    ← Electron app (main + renderer + preload)
+packages/
+  git/                  ← @sproutgit/git — simple-git wrapper; all Git operations
+  terminal/             ← @sproutgit/terminal — node-pty wrapper
+  database/             ← @sproutgit/database — Drizzle + node:sqlite
+  types/                ← @sproutgit/types — shared types + ALL IPC channel constants
+  ui/                   ← @sproutgit/ui — shared React components
+  ts-config/            ← shared tsconfig
+  eslint-config/        ← shared ESLint config
+e2e/                    ← Playwright end-to-end tests
+website/                ← Astro marketing site
+old/                    ← Legacy Tauri/SvelteKit source (do NOT modify)
 ```
 
-## Rust Backend (`src-tauri/src/lib.rs`)
+---
 
-`src-tauri/src/lib.rs` is the source of truth for registered Tauri commands via `tauri::generate_handler![]`.
+## Main process (`app/src/main/`)
 
-### Structs (all `#[serde(rename_all = "camelCase")]`)
+- **Entry point:** `app/src/main/index.ts`
+  - Registers all IPC handlers on app startup
+  - Creates `BrowserWindow` with `titleBarStyle: 'hiddenInset'` on macOS
+  - Sets `app.name = 'SproutGit'` before `whenReady()`
+  - Sets dock icon in dev mode via `app.dock?.setIcon()`
+  - Registers macOS application menu via `Menu.setApplicationMenu()` — **required for Cmd+C/V/Z/X to work in text inputs**
+  - Handles `open-file` event and sends `IPC.EVENT_OPEN_WORKSPACE` to renderer
 
-- `GitInfo` — installed, version
-- `WorktreeInfo` — path, head, branch, detached
-- `WorktreeListResult` — repo_path, worktrees
-- `WorkspaceInitResult` — workspace_path, root_path, worktrees_path, metadata_path, state_db_path, cloned
-- `WorkspaceStatus` — workspace_path, root_path, worktrees_path, metadata_path, state_db_path, is_sproutgit_project, root_exists, worktrees_exists, metadata_exists, state_db_exists
-- `RefInfo` — name, full_name, kind, target
-- `RefsResult` — repo_path, refs
-- `CommitEntry` — hash, short_hash, parents, author_name, author_date, subject, refs
-- `CommitGraphResult` — repo_path, commits
-- `CreateWorktreeResult` — worktree_path, branch, from_ref
+- **IPC handlers:** `app/src/main/ipc/`
+  - `git.ts` — Git operations (delegates to `@sproutgit/git`)
+  - `workspace.ts` — workspace CRUD, recent workspaces, hooks, worktree metadata
+  - `workspace-init.ts` — import, init, inspect workspace (creates `.sproutgit/` layout)
+  - `terminal.ts` — PTY create/write/resize/kill (delegates to `@sproutgit/terminal`)
+  - `settings.ts` — user settings stored in config DB
+  - `system.ts` — OS utilities (dialog, open external, home dir)
+  - `github.ts` — GitHub OAuth + repo listing
+  - `hooks.ts` — workspace lifecycle hook execution
+  - `watcher.ts` — chokidar filesystem watcher → push events to renderer
+  - `update.ts` — electron-updater auto-update
 
-### Tauri Commands (Representative, Not Exhaustive)
+---
 
-Representative command groups currently include:
+## IPC contract
 
-- Git operations and worktree lifecycle (`git_info`, `list_worktrees`, `create_managed_worktree`, `delete_managed_worktree`, `checkout_worktree`, `reset_worktree_branch`, `get_worktree_push_status`, `fetch_worktree`, `pull_worktree`, `push_worktree_branch`)
-- Diff and staging (`get_diff_files`, `get_diff_content`, `get_worktree_status`, `stage_files`, `unstage_files`, `create_commit`, `get_working_diff`)
-- Workspace and config (`create_sproutgit_workspace`, `import_git_repo_workspace`, `inspect_sproutgit_workspace`, recent workspaces, app settings)
-- Hooks (`list_workspace_hooks`, create/update/delete/toggle, `run_workspace_hook`)
-- Worktree metadata (`list_worktree_provenance`, `get_worktree_provenance`, nested repo sync rule CRUD)
-- Editor/Git tool integration (`open_in_editor`, editor detection, git config read/write)
-- Terminal and watcher (`spawn_terminal`, `terminal_input`, `start_watching_worktrees`)
-- Optional E2E-only helpers (`set_window_size` when `e2e-testing` feature is enabled)
+**Rule: all IPC channel names live in `packages/types/src/ipc.ts`.**
 
-When command surfaces change, update this section in the same change.
+- Export name pattern: `IPC.DOMAIN_ACTION` (e.g., `IPC.GIT_STAGE_FILES`)
+- String value pattern: `'domain:action'` (e.g., `'git:stageFiles'`)
+- Event channels are prefixed `EVENT_` and use the string prefix `'event:'`
 
-### Helper Functions
+When adding a new IPC call:
+1. Add the constant to `packages/types/src/ipc.ts`
+2. Rebuild types: `pnpm --filter @sproutgit/types build`
+3. Add the handler in the appropriate `app/src/main/ipc/*.ts` file
+4. Expose it via `window.api` in `app/src/preload/index.ts` using `contextBridge.exposeInMainWorld`
+5. Consume via `window.api.myNewCall()` in the renderer — never use `ipcRenderer` directly in the renderer
 
-- `run_git(args)` — Execute `git` with args, capture stdout
-- `ensure_git_success(args)` — Run git, return error on non-zero exit
-- `normalize_existing_path` / `normalize_or_create_dir` — Path canonicalization
-- `initialize_workspace_db(path)` — Run workspace migrations, creating `state.db` if needed
-- `slugify_for_path(name)` — Branch name → filesystem-safe slug
-- `now_epoch_seconds()` — Current Unix timestamp
+---
 
-### Important Patterns
+## Preload (`app/src/preload/index.ts`)
 
-- Clone uses `--progress` flag with piped stderr, emitting `clone-progress` Tauri events via `tauri::Emitter` for real-time UI feedback
-- `create_sproutgit_workspace` takes `app_handle: tauri::AppHandle` for event emission
-- Commit graph uses `\x1e` (record separator) as field delimiter in git log format
-- All git operations use `git -C <path>` to target specific repos
+Exposes `window.api` (and types `Window.Api`) via `contextBridge`.
 
-## Frontend API (`src/lib/sproutgit.ts`)
+- Invoke calls: `ipcRenderer.invoke(IPC.CHANNEL, ...args)`
+- Event subscriptions return an unsubscribe function:
+  ```ts
+  onMyEvent: (cb: (data: MyData) => void) => {
+    const listener = (_e: Electron.IpcRendererEvent, data: MyData) => cb(data);
+    ipcRenderer.on(IPC.MY_EVENT, listener);
+    return () => ipcRenderer.removeListener(IPC.MY_EVENT, listener);
+  },
+  ```
 
-Typed wrappers around `invoke()` from `@tauri-apps/api/core`. Every Rust struct has a matching TypeScript type.
+---
 
-`src/lib/sproutgit.ts` is the source of truth for frontend-callable API wrappers.
+## Renderer (`app/src/renderer/`)
 
-Representative export groups include:
+### Routing
 
-- `getGitInfo()`, `createWorkspace()`, `inspectWorkspace()`
-- Workspace import and recents/settings
-- Worktree lifecycle (`createManagedWorktree`, delete, checkout, reset, push status, fetch, pull, push/publish)
-- Diff and staging helpers
-- Hook CRUD + progress listeners (`onHookProgress`)
-- Worktree provenance + nested repo sync rule helpers
-- File watcher helpers
-- Terminal lifecycle helpers
-- GitHub auth/repo helpers
-- Event listeners (`onCloneProgress`, `onImportProgress`, `onWorktreeChanged`, terminal events)
+- **TanStack Router v1** with `createHashHistory()`
+- Routes in `app/src/renderer/routes/`:
+  - `__root.tsx` — root layout (ToastContainer, `onOpenWorkspace` subscription)
+  - `index.tsx` — home/landing view (recent workspaces, clone, import)
+  - `workspace.tsx` — main workspace view (worktree sidebar + content area)
+  - `settings.tsx` — settings panel
+- Navigation: `useNavigate()` from TanStack Router, or `window.location.hash = '#/route?param=value'`
 
-## Theme System
+### State management
 
-CSS custom properties with auto dark mode:
+- **Zustand v5**; stores in `app/src/renderer/stores/`
+- `useWorkspaceStore` — active workspace path, gitRepoPath, worktrees, status
+- `useUpdateStore` — update availability state
 
-- Light mode: `:root { --sg-bg: #f5f5f5; --sg-primary: #1a8a5c; ... }`
-- Dark mode: `@media (prefers-color-scheme: dark) { :root { --sg-bg: #1e1e2e; --sg-primary: #74c7a4; ... } }`
-- All tokens prefixed `--sg-*`: bg, surface, surface-raised, border, border-subtle, text, text-dim, text-faint, primary, primary-hover, danger, warning, accent, input-bg, input-border, input-focus
+### Styling
 
-Always use `var(--sg-*)` tokens in components. Never hardcode colors outside of `app.css`.
+- **Tailwind CSS v4** — utility classes only (no config file, uses CSS variables)
+- CSS variables for brand/semantic colours defined in `app/src/renderer/tailwind.css`
+- Custom variable prefix: `--sg-*`
+- Use `cn()` (from `clsx`/`tailwind-merge`) for conditional class names
+- **Icons:** use `lucide-react` for all renderer/UI icons. Do not introduce new icon libraries, emoji glyphs, or ad-hoc inline icon text when a Lucide icon exists.
 
-**Light and dark mode are both required.** Every component and UI surface must look correct in both. When designing or editing any UI:
+### Workspace layout components
 
-- Use only `var(--sg-*)` tokens — never hardcode hex colors in components.
-- Mentally verify the design in both light mode (`--sg-bg: #f5f5f5`, `--sg-text: #1e1e2e`) and dark mode (`--sg-bg: #1e1e2e`, `--sg-text: #cdd6f4`).
-- Components that use Canvas or WebGL rendering (e.g. xterm.js terminals) require explicit theme objects for both modes — detect `window.matchMedia('(prefers-color-scheme: dark)').matches` at init time and apply the correct theme.
-- For screenshot testing, `forceTheme()` in `e2e/helpers/screenshots.ts` handles CSS var injection and xterm canvas re-theming — keep it in sync with any new terminal-like components.
+Located in `app/src/renderer/workspace/`:
+- `WorktreeSidebar.tsx` — list of worktrees + compact icon toolbar
+- `dialogs/` — `NewWorktreeDialog`, `DeleteWorktreeDialog`, `HooksDialog`, etc.
 
-## Commit Graph Component
+---
 
-`CommitGraph.svelte` implements a hand-rolled lane assignment algorithm:
+## Database (`@sproutgit/database`)
 
-- **Algorithm**: Two-pass column allocation. First pass assigns lanes (first parent continues lane, others allocate new). Second pass resolves parent positions for line drawing.
-- **Rendering**: SVG for lane lines (straight + bezier curves) alongside a commit list with subject, ref badges, short hash, author, date.
-- **Search**: CMD/CTRL+F opens inline search bar. Matches by subject, short hash, or full hash. Enter/Shift+Enter navigates matches. Non-matching rows dim to 30% opacity.
-- **Context Menu**: Right-click on commits, branches, or tags shows copy actions (hash, message, branch, worktree path). Uses `ContextMenu.svelte`.
-- **Worktree Integration**: Accepts `worktrees` prop. Commits on worktree branches get a diamond node shape (vs circle), a "WT" badge, and a distinct accent-colored ref badge with ⌥ prefix. Worktree branches are highlighted in `--sg-accent` color.
-- **Constants**: ROW_H=28, COL_W=16, NODE_R=4, 10 cycling lane colors.
+- **`node:sqlite`** (built into Electron ≥32) — no native binary dependencies
+- Drizzle ORM for schema and migrations
+- **Config DB:** `userData/config.db` — user settings, recent workspaces
+- **Workspace DB:** `<workspacePath>/.sproutgit/state.db` — worktree metadata, hooks, per-workspace UI state, etc.
+- Schema in `packages/database/src/schema/`
+- Migrations in `packages/database/migrations/` (two folders: `config/` and `workspace/`)
+- **Always generate migrations with drizzle-kit — never write migration SQL by hand.**
+  - Config schema: `cd packages/database && pnpm drizzle-kit generate --config=drizzle.config.config.ts`
+  - Workspace schema: `cd packages/database && pnpm drizzle-kit generate --config=drizzle.workspace.config.ts`
 
-## UI Components
+---
 
-### Toast System (`toast.svelte.ts` + `ToastContainer.svelte`)
+## Git package (`@sproutgit/git`)
 
-- **State module**: `toast.svelte.ts` exports `toast.info()`, `toast.success()`, `toast.error()`, `toast.warning()`. Uses `$state` (no Svelte stores). Auto-dismiss after 4s by default.
-- **Renderer**: `ToastContainer.svelte` mounted in `+layout.svelte`. Fixed top-right, slide-in/out animations, close button.
+All git operations go through this package. Do not call `simple-git` directly from the main process — always import from `@sproutgit/git`.
 
-### Autocomplete (`Autocomplete.svelte`)
+Key modules:
+- `client.ts` — simpleGit factory with defaults
+- `commits.ts` — log, graph data
+- `diff.ts` — diff, patch
+- `staging.ts` — stage, unstage, commit
+- `worktrees.ts` — list, add, remove worktrees
+- `branches.ts` — create, delete, rename branches
+- `remote.ts` — fetch, pull, push
 
-- Filterable dropdown with `items: {label, value, detail?}[]`. Supports keyboard nav (up/down/enter/escape), click outside to close.
-- Two-way binding via `bind:value`. `onselect` callback. ARIA combobox role.
-- Used for source branch selection in the workspace sidebar.
+---
 
-### Context Menu (`ContextMenu.svelte`)
+## Terminal package (`@sproutgit/terminal`)
 
-- `items: MenuItem[]` with `{label, action, icon?, danger?}` or `{separator: true}`.
-- Auto-adjusts position to stay within viewport bounds. Closes on click outside or Escape.
+- `TerminalManager` in `packages/terminal/src/terminal-manager.ts`
+- Manages a pool of `node-pty` instances keyed by `(workspacePath, worktreePath)`
+- IPC handlers in `app/src/main/ipc/terminal.ts` delegate to `TerminalManager`
 
-### Spinner (`Spinner.svelte`)
+---
 
-- Sizes: `sm`, `md`, `lg`. Optional `label` text. Uses `--sg-primary` color.
-
-### Form Controls (`Checkbox.svelte` + `Select.svelte`)
-
-- Use shared form controls from `src/lib/components/` instead of ad-hoc checkbox/select markup in feature components.
-- `Checkbox.svelte` is the source of truth for custom checkbox visuals and spacing behavior. Keep checked/unchecked icon rendering layout-stable to avoid row height shifts.
-- `Select.svelte` is the source of truth for themed dropdowns. Prefer it over native `<select>` styling repeated inline.
-
-## Database Architecture
-
-SproutGit uses two SQLite databases, each with its own versioned migration set.
-
-### Two databases
-
-| Database         | Path                                                                           | Purpose                                                                 |
-| ---------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------- |
-| **Workspace DB** | `<workspace>/.sproutgit/state.db`                                              | Per-project state: meta, hook definitions, hook runs, worktree sessions |
-| **Config DB**    | OS app-data dir (`~/Library/Application Support/SproutGit/config.db` on macOS) | App-global settings and recent workspace list                           |
-
-A SproutGit workspace is identified by the presence of `state.db` (not a `project.json` — that file no longer exists).
-
-### Migration system (`rusqlite_migration`)
-
-Migrations are plain `.sql` files embedded at compile time via `include_str!` and applied by `rusqlite_migration` on every database open. Version state is tracked automatically in a `__migrations` table that the library manages.
-
-**File layout:**
+## Workspace layout on disk
 
 ```
-src-tauri/migrations/
-  workspace/
-    001_initial_schema.sql   ← tables/indexes for state.db
-    002_next_change.sql      ← (future)
-  config/
-    001_initial_schema.sql   ← tables/indexes for config.db
+<workspacePath>/
+  .sproutgit/
+    root/           ← bare git repository (git init --bare)
+    worktrees/      ← managed worktrees (one subdirectory per worktree)
+    state.db        ← workspace SQLite database
+  .sproutgit/root.git → symlink for compatibility (if needed)
 ```
 
-**How migrations are registered (`src-tauri/src/db.rs`):**
+---
 
-```rust
-static WORKSPACE_MIGRATIONS: LazyLock<Migrations<'static>> = LazyLock::new(|| {
-    Migrations::new(vec![
-        M::up(include_str!("../migrations/workspace/001_initial_schema.sql")),
-        // append new migrations here in order
-    ])
-});
-```
+## Security rules
 
-**Rules:**
+- **`nodeIntegration: false`** and **`contextIsolation: true`** always. Do not change these.
+- All Node.js/system access must go through the context bridge.
+- Never pass unsanitised user input to shell commands. Use `simple-git` APIs, not `exec`.
+- Validate file paths received over IPC before passing to filesystem APIs.
 
-- Never modify an already-shipped migration file. Add a new numbered file instead.
-- Append the new `M::up(include_str!("../migrations/<db>/<NNN>_….sql"))` entry to the correct `LazyLock` vec.
-- Indexes that reference a column added in the same migration must appear after that `ALTER TABLE` in the same file, or in a later migration file.
-- Do not create bespoke `PRAGMA table_info` checks — the framework handles idempotency.
-- **Never add `ALTER TABLE … ADD COLUMN` statements outside migration files**, even as "compatibility shims" that try to swallow "duplicate column name" errors. SQLite error strings can vary across versions, making string-matching fragile. If a column is needed, add a numbered migration file and register it in the `LazyLock` vec.
+---
 
-### `db.rs` public API
+## E2E testing (`e2e/`)
 
-- `connect_workspace_db(workspace_path)` — Runs workspace migrations then returns a SeaORM connection.
-- `connect_config_db()` — Runs config migrations then returns a SeaORM connection.
-- `initialize_workspace_db(workspace_path)` — Runs workspace migrations only (no SeaORM connection returned); used during workspace creation.
-- `write_workspace_meta(db_path, …)` — Inserts identifying path metadata into the `meta` table using `INSERT OR IGNORE` (preserves `created_at` across re-opens).
+- **Framework:** Playwright with `@playwright/test` + Electron driver
+- **Test fixture:** `e2e/fixtures.ts` exports `test` (with `page`, `testRepo`, `gotoHash`)
+- `testRepo` auto-creates a bare-format SproutGit workspace in a temp directory
+- `gotoHash(page, '/route?param=value')` sets `window.location.hash` and waits for navigation
+- Build the app first (`pnpm --filter app build`), then run `pnpm test:e2e`
 
-## Recent Hook Findings
+### Selectors
 
-- Hook dependency compatibility rule: dependencies may be same-trigger or `manual`; incompatible cross-trigger links should fail validation clearly.
-- Hook shell handling must use runtime detection of available shells. On Windows, support both `pwsh` and `powershell` fallback.
+- Prefer `data-testid` attributes for test targeting: `page.getByTestId('btn-create-worktree')`
+- CSS class selectors `sg-*` are stable selectors for E2E (e.g., `.sg-worktree-btn`)
+- Add `data-testid` and `sg-*` CSS classes when adding interactive UI elements
 
-## Animations
+### Important worktree test IDs
 
-Global keyframes defined in `app.css`:
+| Element | `data-testid` |
+|---|---|
+| Create worktree button | `btn-open-create-worktree` |
+| New branch input | `input-new-branch` |
+| Confirm create button | `btn-create-worktree` |
+| Worktree list item | `worktree-item` (also `data-branch`, `data-path`) |
+| Confirm delete button | `btn-confirm-delete-worktree` |
 
-- `sg-fade-in` — content entrance (opacity + translateY)
-- `sg-slide-up` / `sg-slide-down` — directional slide entrances
-- `sg-toast-in` / `sg-toast-out` — toast slide from right
-- `sg-spin` — loading spinner rotation
-- `sg-pulse` — skeleton loading pulse
+---
 
-## Development Commands
+## Build output
+
+| Mode | Output |
+|---|---|
+| Dev | `app/out/` (electron-vite compiled, not packaged) |
+| Production | `app/dist-electron/` (packaged app, e.g., `mac-arm64/SproutGit.app`) |
+| electron-builder resources | `app/build/` (icon.icns, icon.png, entitlements) |
+
+---
+
+---
+
+## Logging
+
+The app uses **electron-log** for persistent structured logging across both processes.
+
+- **Main process**: `log` is exported from `app/src/main/telemetry.ts` — use `log.info/warn/error()` instead of `console.*` for anything worth persisting.
+- **Renderer process**: all `console.*` calls are automatically forwarded to the log file via the `console-message` event in `createWindow()`.
+- **Log outputs to both console (dev) and file (always).**
+
+### Log file locations
+
+| Platform | Path |
+|---|---|
+| macOS | `~/Library/Logs/SproutGit/main.log` |
+| Windows | `%APPDATA%\SproutGit\logs\main.log` |
+| Linux | `~/.config/SproutGit/logs/main.log` |
+
+### Tailing logs for diagnostics
 
 ```bash
-# Prerequisites: source cargo and nvm
-source "$HOME/.cargo/env"
-source ~/.nvm/nvm.sh
-
-# Install deps
-pnpm install
-
-# Validate everything compiles
-pnpm run check          # svelte-check
-pnpm run build          # vite build
-cd src-tauri && cargo check  # Rust check
-
-# Linting & formatting
-pnpm run lint           # oxlint
-pnpm run lint:fix       # oxlint with autofix
-cargo clippy --all-targets -- -D warnings  # Clippy lints (in src-tauri/)
-cargo fmt --check       # Format check (in src-tauri/)
-
-# Auto-format code
-pnpm run format         # Prettier (frontend)
-cargo fmt               # rustfmt (backend)
-
-# Run security tests
-pnpm run test:security  # Rust security unit tests
-
-# Run in development
-pnpm run tauri dev
-
-# VS Code task (with nvm support)
-# Defined as: zsh -lc 'source ~/.nvm/nvm.sh && npm run tauri dev'
+# macOS/Linux — live tail during development
+tail -f ~/Library/Logs/SproutGit/main.log
 ```
 
-## Linting & Code Quality
+When diagnosing issues in a running app, tail the log in a separate terminal alongside `pnpm dev`. Renderer and main process output are interleaved with `[renderer]` prefix on renderer lines.
 
-**Rust:**
+---
 
-- **Clippy** — Configured in `src-tauri/Cargo.toml` with `[lints]` section. Enforces security, correctness, complexity checks.
-- **rustfmt** — Configuration in `rustfmt.toml`. Max width 100 chars, consistent style.
-- **Convenience alias** — `cd src-tauri && cargo lint` runs clippy with `-D warnings`.
+## Debugging with Electron MCP Server
 
-**Frontend (TypeScript + Svelte):**
+The project uses **electron** - a local MCP tool for inspecting and debugging the running Electron app via Chrome DevTools Protocol.
 
-- **oxlint** — Fast Rust-based linter configured in `.oxlintrc.json`. Checks security, best practices, unused variables.
-- **Prettier** — Configured in `.prettierrc`. Print width 100, 2-space tabs, single quotes, Svelte support via plugin.
-- **Before commit** — Run `pnpm run lint:fix && pnpm run format` to auto-fix issues.
+### Required workflow for UI/renderer tasks
 
-**CI Integration:**
+- For renderer bugs, visual regressions, Monaco/editor issues, context menu behavior, layout/resize bugs, and interaction bugs, use Electron MCP tools first.
+- Validate fixes directly in the running app via MCP (inspect page structure, evaluate runtime state, and read console output) before asking for manual user verification.
+- Do not stop at code edits alone when MCP validation is available.
+- If MCP cannot be used (server unavailable, no running Electron target, or tool failure), explicitly state the blocker and then provide the minimal manual verification steps.
 
-- All linters run in GitHub Actions on every push (see `.github/workflows/`)
-- Linting failures block PR merge
-- Format violations reported as annotations on PR
+### Example Usage
 
-## Release Notes Standard (Required)
+1. Start the dev app: `pnpm dev`
+2. Inspect page state, console logs, and execute commands directly via the MCP server
 
-Every pull request the agent creates or updates **must** include a `## Release Notes` section in the PR body. The CI pipeline extracts this section and prepends it to the GitHub Release created when the PR merges to `main`.
+---
 
-**Format:**
+## CI / Linux E2E pipeline debugging
 
-1. One to three sentences explaining what the change is and why it matters — written for a user, not a developer.
-2. A bullet list of specific user-facing changes. Skip purely internal work (refactors, CI fixes, test-only changes) unless it has a visible effect.
+### Architecture constraints on Apple Silicon
 
-**Example:**
+Full E2E simulation on Apple Silicon (arm64 Mac) is **not feasible** locally:
 
-```markdown
-## Release Notes
+- `act` with arm64 catthehacker images: wdio downloads an x86_64 Chromedriver → `rosetta error: failed to open elf at /lib64/ld-linux-x86-64.so.2`
+- `act --container-architecture linux/amd64` (QEMU): act injects its own arm64 node into the amd64 container → `node: executable file not found in $PATH`
+- Native arm64 Docker containers: Electron runs, but Chromedriver is always fetched as x86_64
 
-This release hardens the E2E test setup so the Playwright testing bridge is never included in production builds, and fixes concurrent test runs interfering with each other.
+**Definitive validation requires pushing to GitHub and letting the real `ubuntu-latest` (x86_64) runners execute the E2E suite.**
 
-- `tauri-plugin-playwright` is now compiled only when the `e2e-testing` Cargo feature is active — it is absent from all production builds
-- E2E test run directories now use 12-hour TTL cleanup instead of deleting all sibling runs at startup, making concurrent CI runs safe
-- Production capability manifest no longer grants Playwright permissions
-```
+### Known Linux CI gotchas
 
-**Rules:**
+- **D-Bus deadlock**: `autoUpdater.checkForUpdates()` in `electron-updater` makes a blocking D-Bus IPC call on Linux when the system D-Bus daemon is running (always present on `ubuntu-latest`). In E2E mode, this deadlocks the Electron main process before the renderer loads. **Fix**: guard `startUpdateCheck()` with `if (!isE2EMode)` in `app/src/main/index.ts`. The `isE2EMode` flag is set when `process.argv.includes('--sproutgit-e2e')`, which wdio passes when launching Electron.
+- **Headless display**: Electron requires a display server on Linux. Wrap the E2E command with `xvfb-run --auto-servernum --server-args="-screen 0 1280x800x24"` and ensure `xvfb` is installed in the apt-get step.
+- **Sandbox**: pass `--no-sandbox --disable-setuid-sandbox` to Electron in CI (already in `wdio.conf.ts`).
 
-- Always write this section before opening or updating a PR — do not omit it.
-- Use plain language. Avoid Rust/TypeScript jargon in the explanatory sentences.
-- If a PR contains no user-facing changes (e.g. pure CI/infra work), write: `No user-facing changes in this release.`
+### Proving a Linux-specific hang locally (arm64 Docker)
 
-## Agent Interaction Rules
-
-- **Pause and ask when the user asks multiple questions or a request has multiple open design decisions.** Use `vscode_askQuestions` to collect answers before implementing. Do not assume and proceed; gather answers first.
-- This is especially important for cross-cutting concerns like testing strategy, CI setup, and architectural choices.
-- **Never push without explicit user approval.** Before running `git push` (or any command that publishes commits to a remote), ask the user for confirmation in the current thread and wait for a clear yes.
-
-## Coding Conventions
-
-- **Svelte 5 runes only** — Use `$state`, `$derived`, `$props`. No legacy `let` reactivity or stores.
-- **Component props** — Use `type Props = { ... }; let { ... }: Props = $props();`
-- **Tailwind utility classes** — Inline in templates. Use `var(--sg-*)` for theme-aware colors.
-- **Rust serde** — All structs use `#[serde(rename_all = "camelCase")]` for JS interop.
-- **Error handling** — Rust commands return `Result<T, String>`. Frontend uses try/catch on `invoke()`.
-- **No stores** — All page state uses `$state` directly in `<script>` blocks.
-- **Imports** — Frontend API types come from `$lib/sproutgit`. Components from `$lib/components/`.
-
-## Security And Cross-Platform Rules (Required)
-
-When adding or changing **any** git or system interaction, follow all rules below.
-
-- **Secure-by-default execution**: Never use shell interpolation (`sh -c`, `bash -c`, PowerShell `-Command`) for git/system actions. Always call executables directly with explicit argument vectors.
-- **Injection safety**: Treat all user-controlled values (refs, branch names, config keys, paths, URLs) as untrusted. Trim, validate, and reject values that are empty, start with `-`, or contain control characters.
-- **Escalation safety**: Do not execute arbitrary repo-provided hooks/scripts implicitly. Keep `GIT_TERMINAL_PROMPT=0` for non-interactive backend operations.
-- **Option-boundary safety**: For commands that accept untrusted values, use argument boundaries (for example `--` when supported) to prevent option smuggling.
-- **System command registry**: Route all git/system process execution through registered helpers (`GitAction` / `SystemAction`) so behavior is auditable and testable.
-- **Cross-platform compatibility**: Assume macOS, Linux, and Windows on every change. Avoid OS-specific shell utilities unless a platform-specific fallback exists.
-- **Cross-platform subprocess checklist**: For any subprocess-env, hook, or shell-adjacent change, verify quoting, path semantics, and command behavior for bash/zsh and PowerShell (`pwsh` + Windows PowerShell compatibility where relevant).
-- **Path handling**: Use `Path`/`PathBuf` and platform-aware path/env separators. Do not hardcode `:` as PATH separator.
-- **Path canonicalization on Windows**: `std::fs::canonicalize()` returns `\\?\`-prefixed extended-length paths on Windows (e.g. `\\?\D:\...`). Always chain `strip_win_prefix()` from `crate::git::helpers` immediately after any `canonicalize()` call. This applies to paths stored in SQLite, set as subprocess env vars, or passed to shell scripts — not just paths serialised to the frontend. Git for Windows tolerates extended-length paths silently, but PowerShell cmdlets (e.g. `Join-Path`) reject them with cryptic errors.
-- **Single-source normalization rule**: Path normalization logic must live in shared helpers, not duplicated at call sites. When introducing a new canonicalization/normalization path, reuse existing helper functions or add one shared helper first.
-- **Path serialization — frontend-bound values**: Any `Path`/`PathBuf` value serialised in a Tauri command response (struct fields, `Ok(...)` return values) **must** be converted with `path_to_frontend()` from `crate::git::helpers`, not with `to_string_lossy()`. Git always outputs forward slashes on every OS; using the same convention prevents frontend path-comparison mismatches on Windows. Paths passed as arguments to git/system commands should stay as native OS paths via `to_string_lossy()` directly. **This also applies to path strings parsed from git command output** (e.g. the `worktree <path>` lines from `git worktree list --porcelain`) — call `path_to_frontend(Path::new(parsed_str))` rather than inlining `str.replace('\\', "/")` at the call site.
-- **Frontend path handling — required helpers (`$lib/path-utils`)**: All path operations in the webview/TypeScript code **must** go through `src/lib/path-utils.ts`. This is the frontend mirror of the Rust helpers (`path_to_frontend`, `strip_win_prefix`) and is the single source of truth for cross-platform path behavior in Svelte/TS.
-  - Use `normalizePathSeparators(p)` to canonicalize separators. **Never** inline `.replace(/\\/g, '/')` on a path string.
-  - Use `pathsEqual(a, b)` to compare paths. **Never** use `===` or `!==` directly on path strings (case sensitivity differs across macOS/Windows/Linux).
-  - Use `pathStartsWith(parent, child)` for prefix checks (directory-boundary aware).
-  - Use `findPath(items, getPath, target)` to look up an entry by path; this returns the **original-case** entry, which is critical for round-tripping paths back to the backend on Linux.
-  - **Never** call `.toLowerCase()` on a path for storage or for round-tripping back to the backend. Linux is case-sensitive and CI runners use mixed-case paths (e.g. `/home/runner/work/SproutGit/SproutGit`). Lowercasing for storage corrupts the path on Linux. Case-insensitive comparison is the responsibility of `pathKey()` / `pathsEqual()` at the comparison site only.
-  - The helpers detect the host OS via `navigator.userAgent`; comparison is case-insensitive on Windows and macOS, case-sensitive on Linux — matching real filesystem semantics.
-- **Least privilege and clear errors**: Fail closed on invalid input and return clear, user-safe error messages.
-
-## Security Testing Requirements
-
-- Use Rust built-in unit testing (`cargo test`) for backend security tests.
-- Add/maintain unit tests for input validation and command registration invariants.
-- Run security-focused tests before committing.
-- CI must execute these tests on all supported OS targets.
-
-## Code Quality Checklist (Before Committing)
-
-Always run the following before pushing code:
-
-**Frontend:**
+To confirm whether a code path causes a main-process freeze on Linux with D-Bus present, use the cached `sproutgit-dbus-proof-arm64:latest` Docker image:
 
 ```bash
-pnpm run lint      # Check code with oxlint (fast, Rust-based)
-pnpm run lint:fix  # Auto-fix linting issues
-pnpm run format    # Format code with Prettier
-pnpm run check     # TypeScript type check
+# Build the app inside the container, start Xvfb + D-Bus, run Electron for 5s,
+# and check whether the renderer emitted any log lines.
+docker run --rm \
+  -v "$(pwd):/src:ro" \
+  -v "/tmp/your-proof.sh:/proof.sh:ro" \
+  sproutgit-dbus-proof-arm64:latest \
+  bash /proof.sh
 ```
 
-**Backend:**
+Key detection heuristic: after 5 seconds, if no `[renderer]` lines appear in the Electron log, the main process is frozen (D-Bus deadlock). If `[renderer]` lines appear, the app is alive.
 
-```bash
-cd src-tauri
-cargo clippy --all-targets -- -D warnings  # Check for issues
-cargo fmt --check                           # Check formatting
-cargo test --lib                            # Run unit tests
-```
+The image already has: ubuntu 24.04, Node 22, pnpm, xvfb, dbus, all Electron system deps. Rebuild it with `docker build -t sproutgit-dbus-proof-arm64:latest .` from a Dockerfile that installs those deps if it becomes stale.
 
-**Commit only when:**
+---
 
-- ✅ `pnpm run lint` returns 0 warnings, 0 errors
-- ✅ `pnpm run check` passes (0 TypeScript errors)
-- ✅ `cargo clippy` passes (0 warnings with `-D warnings`)
-- ✅ `cargo test --lib` passes (all tests)
-- ✅ Code is formatted (`cargo fmt` and `pnpm run format`)
+## Common pitfalls
 
-## Prompt Improvement Loop (Required)
-
-After resolving a CI failure or production bug, update these instructions in the same PR when a reusable lesson exists.
-
-- Add one durable guardrail: an invariant, checklist item, or triage step.
-- Prefer operational rules over narrative explanation.
-- If no user-facing behavior changed, still capture the prevention rule.
-
-## Documentation Drift Prevention (Required)
-
-When editing or relying on documentation in this repository:
-
-- Treat `README.md`, `.github/copilot-instructions.md`, `src-tauri/src/lib.rs`, `src/lib/sproutgit.ts`, and `package.json` as a consistency set.
-- If a command, script, route, or API wrapper changes in code, update the corresponding docs in the same change.
-- Prefer representative command/API summaries plus explicit source-of-truth links over exhaustive static lists that quickly drift.
-- Remove placeholders and stale claims (for example, outdated URLs or deleted files) immediately when discovered.
-- **When editing component markup or styles, check nearby code comments for implementation-detail references** (e.g. hardcoded class names, colour literals) that may no longer be accurate. Stale comments about specifics like "hardcoded `bg-[#1e1e2e]`" that have since been replaced with CSS-variable equivalents cause confusion and must be updated or removed in the same change.
-
-Quick verification command before commit:
-
-```bash
-rg -n "project\.json|YOUR_USERNAME|once CI is set up" README.md .github/copilot-instructions.md
-```
-
-Frontend path-handling drift check (should return zero hits outside `src/lib/path-utils.ts`):
-
-```bash
-rg -n "\.toLowerCase\(\)|\.replace\(/\\\\\\\\/g, *['\"]/['\"]\)" src/ --glob '!src/lib/path-utils.ts'
-```
-
-## Composability & Platform Extensibility
-
-### Tier 1: GitTransaction Builder (Implemented ✓)
-
-Compose multi-step git operations that execute atomically—failing on first error without partial state.
-
-```rust
-// src-tauri/src/git/helpers.rs
-pub struct GitTransaction {
-    repo_path: PathBuf,
-    ops: Vec<(GitAction, Vec<String>)>,
-}
-
-impl GitTransaction {
-    pub fn new(repo_path: impl AsRef<Path>) -> Self { ... }
-    pub fn git_op(mut self, action: GitAction, args: &[&str]) -> Self { ... }
-    pub fn execute(self) -> Result<Vec<Output>, String> { ... }
-}
-```
-
-**Example: Create feature branch with atomic semantics**
-
-```rust
-GitTransaction::new(&repo_path)
-    .git_op(GitAction::CreateManagedWorktree, &["worktree", "add", "-b", &branch, ...])
-    .git_op(GitAction::Checkout, &["checkout", &branch])
-    .execute()?  // Returns Vec<Output> or error on first failure
-```
-
-**Benefits:**
-
-- Atomic: all-or-nothing semantics
-- Clear intent: sequence of operations visible at a glance
-- Rollback-ready: foundation for future undo functionality
-- Testable: each op can be validated independently
-
-### Tier 1: GitCache Infrastructure (Implemented ✓)
-
-Foundation for memoizing expensive read operations with write-based invalidation.
-
-```rust
-// src-tauri/src/git/helpers.rs
-pub struct CachedValue<T: Clone> {
-    pub data: T,
-    pub timestamp: u64,
-}
-
-pub struct GitCache {
-    last_write: RefCell<u64>,
-}
-
-impl GitCache {
-    pub fn new() -> Self { ... }
-    pub fn invalidate(&self) { ... }  // Call before any write op
-    pub fn is_valid(&self, cache_timestamp: u64) -> bool { ... }
-}
-```
-
-**Usage pattern (ready for implementation):**
-
-- Cache refs to avoid repeated `git branch -a` calls
-- Cache status to avoid repeated `git status --porcelain` calls
-- Call `cache.invalidate()` in any write operation (create, delete, reset, etc.)
-- Check cache validity before fetch: if valid, return cached result
-
-**Estimated win:** 30-40% reduction in read-heavy workflows.
-
-### Tier 2: Semantic High-Level Operations (Implemented ✓)
-
-Pre-built, intent-clear wrappers that reduce client-side orchestration complexity.
-
-```rust
-// src-tauri/src/git.rs
-
-/// Create a feature branch worktree (clearer than create_managed_worktree)
-pub async fn create_feature_worktree(
-    root_path: String,
-    worktrees_path: String,
-    source_ref: String,
-    feature_name: String,
-) -> Result<CreateWorktreeResult, String> { ... }
-
-/// Switch worktree branch (semantic alias for checkout with auto-stash)
-pub async fn switch_worktree_branch(
-    worktree_path: String,
-    target_ref: String,
-    auto_stash: bool,
-) -> Result<CheckoutResult, String> { ... }
-
-/// Reset worktree to clean state (hard reset + clean untracked)
-pub async fn reset_worktree_to_ref(
-    worktree_path: String,
-    target_ref: String,
-) -> Result<String, String> { ... }
-```
-
-**Frontend code becomes clearer:**
-
-```typescript
-// BEFORE: Low-level operations scattered in frontend
-await createManagedWorktree(root, worktrees, sourceRef, branchName);
-await checkoutWorktree(worktreePath, targetRef, true);
-
-// AFTER: Intent-clear semantic operations
-await createFeatureWorktree(root, worktrees, sourceRef, featureName);
-await switchWorktreeBranch(worktreePath, targetRef, true);
-```
-
-### Tier 2: Parallel Operations (Pattern for Future Use)
-
-Use Tauri's async/await with tokio for concurrent git operations.
-
-```rust
-pub async fn fetch_parallel_data(repo_path: String) -> Result<WorkspaceSnapshot, String> {
-    let refs_fut = list_refs(repo_path.clone());
-    let status_fut = get_status(repo_path.clone());
-    let graph_fut = get_commit_graph(repo_path.clone(), None);
-
-    // Join all futures in parallel
-    let (refs, status, graph) = tokio::try_join!(
-        refs_fut,
-        status_fut,
-        graph_fut,
-    )?;
-
-    Ok(WorkspaceSnapshot { refs, status, graph })
-}
-```
-
-**Benefits:**
-
-- Non-blocking: no sequential waiting
-- ~30% faster for batch reads
-- Uses Tauri's built-in tokio runtime (no extra dependency)
-- Perfect for workspace initialization
-
-### Tier 3: Instrumentation & Middleware (Future)
-
-Add logging, metrics, and tracing for observability:
-
-- Log cache hits vs misses
-- Measure git operation latency
-- Track error rates by operation type
-- Profile hot paths
-
-### Recommended Next Steps
-
-1. **Activate caching** — Implement refs and status caching in existing commands
-2. **Measure impact** — Profile before/after cache activation
-3. **Implement parallel fetch** — Use pattern above for workspace initialization
-4. **Add instrumentation** — Log/trace git operations (Tier 3)
-5. **Document custom operations** — Add semantic ops as you create them
-
-## Loading UI Patterns
-
-**All async operations must have an associated loading state.** This ensures users understand that work is happening and prevents duplicate submissions.
-
-### Frontend Loading States
-
-Every async operation requires three elements:
-
-1. **State variable** — `let opName = $state(false)` for single ops, or `let opName = $state<string | null>(null)` for multi-item ops (e.g., which worktree is deleting)
-2. **Set during operation** — Set to `true` (or the identifier) before `invoke()`, reset in `finally` block
-3. **UI feedback** — Show spinner + label, disable submit button, or show progress indicator
-
-#### Pattern: Single Async Operation
-
-```svelte
-<script>
-  let creating = $state(false);
-
-  async function handleCreate(event: Event) {
-    event.preventDefault();
-    creating = true;
-    error = "";
-    try {
-      await createManagedWorktree(...);
-      toast.success("Worktree created");
-    } catch (err) {
-      toast.error(String(err));
-    } finally {
-      creating = false;
-    }
-  }
-</script>
-
-<button type="submit" disabled={creating}>
-  {#if creating}
-    <Spinner size="sm" /> Creating…
-  {:else}
-    Create worktree
-  {/if}
-</button>
-```
-
-#### Pattern: Multi-Item Async Operation
-
-```svelte
-<script>
-  let deleting = $state<string | null>(null); // Track which item is being deleted
-
-  async function handleDelete(id: string) {
-    deleting = id;
-    try {
-      await deleteItem(id);
-    } finally {
-      deleting = null;
-    }
-  }
-</script>
-
-<button disabled={deleting === item.id}>
-  {#if deleting === item.id}
-    <Spinner size="sm" />
-  {:else}
-    Delete
-  {/if}
-</button>
-```
-
-#### Pattern: Content/Data Loading
-
-```svelte
-<script>
-  let loading = $state(true);
-  let graphData = $state(null);
-
-  async function loadData() {
-    loading = true;
-    try {
-      graphData = await getCommitGraph(...);
-    } finally {
-      loading = false;
-    }
-  }
-</script>
-
-<div class="flex flex-1 flex-col overflow-hidden">
-  {#if loading}
-    <div class="flex flex-1 items-center justify-center gap-2">
-      <Spinner size="md" />
-      <p class="text-xs text-[var(--sg-text-faint)]">Loading commit history…</p>
-    </div>
-  {:else}
-    <CommitGraph commits={graphData} />
-  {/if}
-</div>
-```
-
-### Rules
-
-- **Always set `false/null` in `finally`** — Guarantees cleanup even on error
-- **Pair with `toast.error()` on catch** — Users need to know what went wrong
-- **Disable interactive elements while loading** — `disabled={loading || creating}` for buttons
-- **Show meaningful labels** — "Loading commit history…" > "Loading…"
-- **Use consistent animations** — `style="animation: sg-fade-in 0.3s ease-out"` for loading containers
-
-### Spinner Component
-
-The `Spinner.svelte` component supports:
-
-- **Sizes**: `sm`, `md`, `lg`
-- **Label**: Optional text below spinner
-- **Color**: Inherits `--sg-primary` automatically
-
-```svelte
-<Spinner size="md" label="Loading…" />
-<Spinner size="sm" />
-<!-- No label -->
-```
-
-## Known Issues & Gotchas
-
-- `cargo` must be in PATH — always `source "$HOME/.cargo/env"` before running `tauri dev`
-- `git clone --progress` writes to **stderr**, not stdout
-- Tauri event emission requires `tauri::Emitter` trait in scope
-- `format!()` in Rust: don't mix string concatenation with format placeholders — use `.join()` for building git format strings
-- SQLite + SeaORM (`sqlx-sqlite`) integer decode: avoid `u64` in `FromQueryResult` structs; use `i64` for `INTEGER` columns (timestamps included)
-- Svelte 5 `class:` directive with Tailwind arbitrary values (e.g., `class:bg-[var(--x)]/10={cond}`) works but looks odd
-- Window overflow: parent containers must be `flex flex-col overflow-hidden` for child `flex-1 overflow-auto` to scroll properly
-- **Windows `\\?\` paths in PowerShell**: If a path produced by `canonicalize()` is set as a subprocess env var and consumed by PowerShell, `Join-Path` will fail with "Cannot process argument because the value of argument 'drive' is null". The env var is non-null so a `if (-not $var)` guard won't catch it — the crash happens on the next line that uses the path. Always apply `strip_win_prefix` before passing any path into a hook or child process environment.
-- **`TerminalContainer.svelte` auto-spawn**: The component spawns an initial terminal session on mount via a `$effect` guarded by a plain (non-reactive) `_autoSpawned` flag. Do not remove this — E2E flows assert that a `[data-pty-id]` element exists immediately after the Terminal tab is revealed. If the auto-spawn is absent, the terminal tab is stuck on "No terminal sessions" until the user manually clicks `+`. The flag guard also prevents a reactive loop that would occur if `sessions.length` were read directly inside the effect (which Svelte would track as a dependency and re-fire on every session change).
-- **Changes-tab watcher refreshes vs git writes**: Do not call `getWorktreeStatus()` from file-watcher handlers while a stage, unstage, or commit mutation is in flight. On Windows, concurrent `git status` refreshes can contend with `git add` / `git commit` over `index.lock`, causing deterministic E2E failures. Queue watcher refreshes and flush them after the write completes.
+- **Don't import from `old/`** — it's the Tauri/SvelteKit source for reference only.
+- **`node:sqlite` not `better-sqlite3`** — the Electron-bundled SQLite is used; `better-sqlite3` is stubbed out with `betterSqlite3Stub` in `electron.vite.config.ts`.
+- **Hash router** — use TanStack Router's `useNavigate()` / link components; don't manipulate `window.location` directly except in non-React contexts.
+- **Menu required on macOS** — always ensure `Menu.setApplicationMenu()` is called or clipboard shortcuts (Cmd+C/V/Z/X) will not work.
+- **`app.addRecentDocument()`** — must be called whenever a workspace is opened to keep the macOS dock "Open Recent" and Windows jump list in sync.

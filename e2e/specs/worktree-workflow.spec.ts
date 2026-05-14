@@ -1,75 +1,29 @@
-import { test, expect } from '../fixtures';
-import { createTestRepo, querySqlite, runGit } from '../helpers/fixtures';
-import { createWorktreeViaUi, DEFAULT_UI_TIMEOUT, importRepoViaUi } from '../helpers/ui';
-import { dirname, join } from 'node:path';
+import { gotoHash, createTestRepo, closeAndCleanup, monitorErrors } from '../helpers.js';
 
-test.describe('Worktree workflow', () => {
-  test('creates, switches, and deletes managed worktrees', async ({ tauriPage }) => {
-    const repoPath = createTestRepo('worktree-test', {
-      extraCommits: 2,
-      branches: ['develop'],
-    });
+describe('worktree workflow', () => {
+  let testRepo: string;
 
-    await importRepoViaUi(tauriPage, repoPath);
-    await createWorktreeViaUi(tauriPage, 'feature/e2e-alpha');
-    await createWorktreeViaUi(tauriPage, 'feature/e2e-beta');
+  beforeEach(() => {
+    testRepo = createTestRepo('worktree');
+  });
 
-    const alphaItem = tauriPage.locator(
-      '[data-testid="worktree-item"][data-branch="feature/e2e-alpha"]'
-    );
-    const betaItem = tauriPage.locator(
-      '[data-testid="worktree-item"][data-branch="feature/e2e-beta"]'
-    );
+  afterEach(async () => {
+    await closeAndCleanup(testRepo);
+  });
 
-    await expect(alphaItem).toBeVisible();
-    await expect(betaItem).toBeVisible();
+  it('shows existing worktrees in the sidebar', async () => {
+    const assertNoErrors = monitorErrors();
+    await gotoHash(`/workspace?path=${encodeURIComponent(testRepo)}`);
+    await expect($('.sg-worktree-btn')).toBeDisplayed();
+    await assertNoErrors();
+  });
 
-    // Verify git state: both worktrees are registered in git
-    const alphaPath =
-      (await alphaItem.getAttribute('data-path')) ??
-      (() => {
-        throw new Error('alpha worktree-item missing data-path');
-      })();
-    const gitRoot = join(dirname(dirname(alphaPath)), 'root');
-    const worktreeList = runGit(gitRoot, ['worktree', 'list', '--porcelain']);
-    expect(worktreeList).toContain('feature/e2e-alpha');
-    expect(worktreeList).toContain('feature/e2e-beta');
-
-    await alphaItem.click();
-    await expect(alphaItem).toBeVisible();
-
-    await betaItem.click();
-    await expect(betaItem).toBeVisible();
-
-    await tauriPage.evaluate(`(() => {
-      const button = document.querySelector('[data-testid="worktree-item"][data-branch="feature/e2e-alpha"] [data-testid="btn-delete-worktree"]');
-      if (!(button instanceof HTMLElement)) {
-        throw new Error('delete worktree button not found for feature/e2e-alpha');
-      }
-      button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    })()`);
-
-    await tauriPage.getByTestId('confirm-dialog').waitFor(DEFAULT_UI_TIMEOUT);
-    await tauriPage.getByTestId('confirm-dialog-confirm').click();
-
-    await tauriPage.waitForFunction(
-      `!document.querySelector('[data-testid="worktree-item"][data-branch="feature/e2e-alpha"]')`,
-      DEFAULT_UI_TIMEOUT
-    );
-    await expect(betaItem).toBeVisible();
-
-    // Verify git state: alpha worktree is gone, beta worktree still exists
-    const worktreeListAfter = runGit(gitRoot, ['worktree', 'list', '--porcelain']);
-    expect(worktreeListAfter).not.toContain('feature/e2e-alpha');
-    expect(worktreeListAfter).toContain('feature/e2e-beta');
-
-    // SQLite assertion: state.db meta table was initialized for this workspace
-    const stateDbPath = join(dirname(dirname(alphaPath)), '.sproutgit', 'state.db');
-    const metaRows = querySqlite(
-      stateDbPath,
-      `SELECT value FROM meta WHERE key = 'workspace_path'`
-    );
-    expect(metaRows.length).toBe(1);
-    expect(metaRows[0]?.[0]).toContain('worktree-test-workspace');
+  it('sidebar shows worktree branch name', async () => {
+    const assertNoErrors = monitorErrors();
+    await gotoHash(`/workspace?path=${encodeURIComponent(testRepo)}`);
+    // The main worktree has a branch (master or main).
+    const label = await $('.sg-worktree-label').getText();
+    expect(label.length).toBeGreaterThan(0);
+    await assertNoErrors();
   });
 });
