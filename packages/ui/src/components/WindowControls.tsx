@@ -5,20 +5,24 @@ import { Minus, Square, Minimize2, X } from 'lucide-react';
  * Window controls component.
  *
  * - macOS: the OS renders the native traffic-light buttons inside the
- *   `hiddenInset` title bar. This component reserves the inset space so
- *   content doesn't overlap the native controls. It renders nothing interactive.
+ *   `hiddenInset` title bar. Use `side="left"` (default) to reserve the inset
+ *   space so content doesn't overlap the native controls. `side="right"`
+ *   renders nothing on macOS.
  *
  * - Windows / Linux: renders custom minimize / maximize / close buttons
  *   via Electron's IPC (window:minimize, window:maximize, window:close).
+ *   Use `side="right"` to place them at the trailing edge of the title bar.
+ *   `side="left"` renders nothing on Windows/Linux.
  */
-export function WindowControls() {
+export function WindowControls({ side = 'left' }: { side?: 'left' | 'right' }) {
   const isMac = typeof navigator !== 'undefined' &&
     navigator.userAgent.toLowerCase().includes('mac');
 
   const [isMaximized, setIsMaximized] = useState(false);
 
   useEffect(() => {
-    if (isMac) return;
+    // Only subscribe on Windows/Linux and only when we're the right-side controls.
+    if (isMac || side === 'left') return;
 
     // Sync initial state.
     void window.api.windowIsMaximized().then(setIsMaximized).catch(() => undefined);
@@ -26,9 +30,10 @@ export function WindowControls() {
     const offMax = window.api.onWindowMaximized(() => setIsMaximized(true));
     const offUnmax = window.api.onWindowUnmaximized(() => setIsMaximized(false));
     return () => { offMax(); offUnmax(); };
-  }, [isMac]);
+  }, [isMac, side]);
 
   if (isMac) {
+    if (side === 'right') return null;
     // Reserve the macOS traffic-light inset area (drag region).
     return (
       <div
@@ -38,6 +43,9 @@ export function WindowControls() {
       />
     );
   }
+
+  // Windows / Linux — left slot renders nothing; buttons go on the right.
+  if (side === 'left') return null;
 
   const winBtn = 'flex items-center justify-center w-11 h-full bg-transparent border-none cursor-pointer text-(--sg-text-dim) transition-colors hover:bg-(--sg-surface-raised) hover:text-(--sg-text)';
 

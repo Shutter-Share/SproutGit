@@ -13,7 +13,8 @@
     "sharp": "^0.34.5"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.2.4",
-    "tailwindcss": "^4.2.4"
+    "@tailwindcss/vite": "4.2.4",
+    "tailwindcss": "4.2.4",
+    "vite": "^7.3.2"
   }
 }

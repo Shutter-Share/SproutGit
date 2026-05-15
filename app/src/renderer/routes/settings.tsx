@@ -45,7 +45,7 @@ function SettingsPage() {
       {/* Titlebar */}
       <header
         data-electron-drag-region
-        className="flex h-(--sg-titlebar-height) shrink-0 items-center gap-3 border-b border-(--sg-border) bg-(--sg-surface) pr-1 pl-(--sg-titlebar-inset)"
+        className="flex h-(--sg-titlebar-height) shrink-0 items-center gap-3 border-b border-(--sg-border) bg-(--sg-surface) pl-(--sg-titlebar-inset)"
       >
         <button
           onClick={goBack}
@@ -58,8 +58,8 @@ function SettingsPage() {
         <span className="sg-heading text-xs font-medium text-(--sg-text)">Settings</span>
         <div className="ml-auto flex h-full items-center gap-2">
           <UpdateBadge state={updateState} onInstall={() => void api.installUpdate()} />
-          <WindowControls />
         </div>
+        <WindowControls side="right" />
       </header>
 
       <div className="flex-1 overflow-auto p-6">

@@ -199,7 +199,7 @@ function WorkspaceInner() {
       targetWorktreePath: initTarget.path,
       initiatingWorktreePath: null,
     }).catch(() => undefined);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspacePath, workspaceStatus != null]);
 
   // ── File watcher → invalidate queries ────────────────────────────────
@@ -219,7 +219,7 @@ function WorkspaceInner() {
       offRefs();
       void api.closeTerminalsForPath(workspacePath);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspacePath, gitRepoPath]);
 
   // ── Session persistence ───────────────────────────────────────────────
@@ -412,7 +412,7 @@ function WorkspaceInner() {
     const isDeletingActive = activeWorktree?.path === wt.path;
     const nextWt = isDeletingActive
       ? worktrees.find(w => w.path !== wt.path && w.path !== workspaceStatus?.rootPath)
-        ?? null
+      ?? null
       : null;
 
     if (isDeletingActive && nextWt) {
@@ -673,13 +673,12 @@ function WorkspaceInner() {
   // ── Style helpers ─────────────────────────────────────────────────────
 
   function tabCls(active: boolean, disabled: boolean = false) {
-    return `sg-tab flex items-center gap-1.5 px-3 h-full text-xs cursor-pointer bg-transparent border-t-0 border-x-0 border-b-2 transition-colors whitespace-nowrap ${
-      disabled
+    return `sg-tab flex items-center gap-1.5 px-3 h-full text-xs cursor-pointer bg-transparent border-t-0 border-x-0 border-b-2 transition-colors whitespace-nowrap ${disabled
         ? 'text-(--sg-text-dim) border-transparent cursor-not-allowed opacity-50'
         : active
           ? 'text-(--sg-text) border-(--sg-primary) font-medium cursor-pointer'
           : 'text-(--sg-text-faint) border-transparent hover:text-(--sg-text) cursor-pointer'
-    }`;
+      }`;
   }
 
   const iconBtn = 'inline-flex items-center justify-center p-[3px] bg-transparent border-none cursor-pointer text-(--sg-text-faint) rounded-[4px] transition-colors hover:text-(--sg-text) hover:bg-(--sg-surface-raised) disabled:opacity-40 disabled:cursor-not-allowed';
@@ -722,316 +721,317 @@ function WorkspaceInner() {
               <Settings size={15} />
             </button>
           </div>
+          <WindowControls side="right" />
         </header>
 
         {/* ── Body: sidebar + main content ── */}
         <div className="flex flex-1 min-h-0 overflow-hidden">
-        {/* Worktree sidebar */}
-        <WorktreeSidebar
-          workspacePath={workspacePath}
-          worktrees={worktrees}
-          activeWorktree={activeWorktree}
-          workspaceStatus={workspaceStatus ?? null}
-          worktreeChangeCounts={worktreeChangeCounts}
-          fetching={fetching}
-          pulling={pulling}
-          pushing={pushing}
-          pushStatus={pushStatus ?? null}
-          creatingWorktree={creatingWorktree}
-          pendingCreationBranch={pendingCreationBranch}
-          updateState={updateState}
-          onWorktreeSwitch={wt => void handleWorktreeSwitch(wt)}
-          onFetch={() => void doFetch()}
-          onPull={() => void doPull()}
-          onPush={() => void doPush()}
-          onRefresh={() => {
-            void qc.invalidateQueries({ queryKey: qk.worktrees(gitRepoPath) });
-            void qc.invalidateQueries({ queryKey: qk.commits(gitRepoPath) });
-            void qc.invalidateQueries({ queryKey: qk.refs(gitRepoPath) });
-            if (activeWorktree) void qc.invalidateQueries({ queryKey: qk.pushStatus(activeWorktree.path) });
-          }}
-          onNewWorktree={() => setShowNewWorktree(true)}
-          onOpenTerminal={(cwd, label) => void openTerminal(cwd, label)}
-          onOpenHooksModal={() => setHooksModalOpen(true)}
-          onOpenRunHookModal={wt => setRunHookTarget(wt)}
-          onDeleteWorktree={wt => setDeleteTarget(wt)}
-        />
+          {/* Worktree sidebar */}
+          <WorktreeSidebar
+            workspacePath={workspacePath}
+            worktrees={worktrees}
+            activeWorktree={activeWorktree}
+            workspaceStatus={workspaceStatus ?? null}
+            worktreeChangeCounts={worktreeChangeCounts}
+            fetching={fetching}
+            pulling={pulling}
+            pushing={pushing}
+            pushStatus={pushStatus ?? null}
+            creatingWorktree={creatingWorktree}
+            pendingCreationBranch={pendingCreationBranch}
+            updateState={updateState}
+            onWorktreeSwitch={wt => void handleWorktreeSwitch(wt)}
+            onFetch={() => void doFetch()}
+            onPull={() => void doPull()}
+            onPush={() => void doPush()}
+            onRefresh={() => {
+              void qc.invalidateQueries({ queryKey: qk.worktrees(gitRepoPath) });
+              void qc.invalidateQueries({ queryKey: qk.commits(gitRepoPath) });
+              void qc.invalidateQueries({ queryKey: qk.refs(gitRepoPath) });
+              if (activeWorktree) void qc.invalidateQueries({ queryKey: qk.pushStatus(activeWorktree.path) });
+            }}
+            onNewWorktree={() => setShowNewWorktree(true)}
+            onOpenTerminal={(cwd, label) => void openTerminal(cwd, label)}
+            onOpenHooksModal={() => setHooksModalOpen(true)}
+            onOpenRunHookModal={wt => setRunHookTarget(wt)}
+            onDeleteWorktree={wt => setDeleteTarget(wt)}
+          />
 
-        {/* Main content */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Tab bar */}
-          <div className="flex items-center border-b border-(--sg-border) bg-(--sg-surface) shrink-0 h-9">
-            <button
-              className={tabCls(activeTab === 'graph')}
-              onClick={() => useWorkspaceStore.setState({ activeTab: 'graph' })}
-            >
-              <GitBranch size={12} /> Graph
-            </button>
-            <button
-              className={tabCls(activeTab === 'staging', !activeWorktree)}
-              onClick={() => {
-                if (!activeWorktree) return;
-                useWorkspaceStore.setState({ activeTab: 'staging' });
-                // Force a fresh git status whenever the user clicks Changes,
-                // so newly-written files are always visible without a watcher event.
-                setStagingRefresh(n => n + 1);
-              }}
-              disabled={!activeWorktree}
-            >
-              <GitMerge size={12} /> Changes
-            </button>
-            <button
-              className={tabCls(activeTab === 'terminal', !activeWorktree)}
-              onClick={() => {
-                if (!activeWorktree) return;
-                if (scopedTerminalSessions.length === 0) {
-                  void openTerminal(activeWorktree.path, activeWorktree.branch ?? undefined);
-                } else {
-                  useWorkspaceStore.setState({ activeTab: 'terminal' });
-                }
-              }}
-              disabled={!activeWorktree}
-            >
-              <Terminal size={12} /> Terminal{scopedTerminalSessions.length > 1 ? ` (${scopedTerminalSessions.length})` : ''}
-            </button>
-          </div>
+          {/* Main content */}
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {/* Tab bar */}
+            <div className="flex items-center border-b border-(--sg-border) bg-(--sg-surface) shrink-0 h-9">
+              <button
+                className={tabCls(activeTab === 'graph')}
+                onClick={() => useWorkspaceStore.setState({ activeTab: 'graph' })}
+              >
+                <GitBranch size={12} /> Graph
+              </button>
+              <button
+                className={tabCls(activeTab === 'staging', !activeWorktree)}
+                onClick={() => {
+                  if (!activeWorktree) return;
+                  useWorkspaceStore.setState({ activeTab: 'staging' });
+                  // Force a fresh git status whenever the user clicks Changes,
+                  // so newly-written files are always visible without a watcher event.
+                  setStagingRefresh(n => n + 1);
+                }}
+                disabled={!activeWorktree}
+              >
+                <GitMerge size={12} /> Changes
+              </button>
+              <button
+                className={tabCls(activeTab === 'terminal', !activeWorktree)}
+                onClick={() => {
+                  if (!activeWorktree) return;
+                  if (scopedTerminalSessions.length === 0) {
+                    void openTerminal(activeWorktree.path, activeWorktree.branch ?? undefined);
+                  } else {
+                    useWorkspaceStore.setState({ activeTab: 'terminal' });
+                  }
+                }}
+                disabled={!activeWorktree}
+              >
+                <Terminal size={12} /> Terminal{scopedTerminalSessions.length > 1 ? ` (${scopedTerminalSessions.length})` : ''}
+              </button>
+            </div>
 
-          {/* Tab content */}
-          <div className="flex-1 overflow-hidden relative">
-            {loading ? (
-              <div className="flex items-center justify-center h-full">
-                <Spinner size="lg" />
-              </div>
-            ) : (
-              <>
-                {/* Graph tab */}
-                {activeTab === 'graph' && (
-                  <div className="flex flex-col h-full">
-                    <div className={selectedCommit ? 'h-1/2 min-h-0 overflow-hidden flex flex-col' : 'flex-1 min-h-0 overflow-hidden flex flex-col'}>
-                    <CommitGraph
-                      commits={commits}
-                      worktrees={worktrees}
-                      activeWorktree={activeWorktree}
-                      hasMore={commits.length < commitTotal}
-                      loadingMore={commitsFetching && commits.length > 0}
-                      onLoadMore={async () => {
-                        const more = await api.getCommitGraph({
-                          repoPath: gitRepoPath,
-                          limit: 500,
-                          skip: commits.length,
-                        }) as CommitEntry[];
-                        qc.setQueryData<CommitEntry[]>(qk.commits(gitRepoPath), prev => [
-                          ...(prev ?? []),
-                          ...more,
-                        ]);
-                      }}
-                      onSelect={selected => {
-                        const nextSelectionKey = selected.map(c => c.hash).join(',');
-                        const currentSelectionKey = selectedCommits.map(c => c.hash).join(',');
-                        if (nextSelectionKey === currentSelectionKey) {
-                          return;
-                        }
-                        if (selected.length === 1 && selected[0]) {
-                          void loadCommitDiff(selected[0]);
-                        } else if (selected.length === 2 && selected[0] && selected[1]) {
-                          void loadCommitRangeDiff(selected[0], selected[1]);
-                        } else {
-                          setSelectedCommits([]);
-                          setCommitDiffFiles([]);
-                          setCommitDiffContent('');
-                          setCommitDiffFile(null);
-                        }
-                      }}
-                      onCreateWorktree={() => {
-                        setShowNewWorktree(true);
-                      }}
-                      onCheckout={ref => {
-                        if (activeWorktree) {
-                          void api.checkout(activeWorktree.path, ref)
-                            .then(() => {
-                              toast('Checked out', 'success');
-                              void qc.invalidateQueries({ queryKey: qk.commits(gitRepoPath) });
-                              void qc.invalidateQueries({ queryKey: qk.refs(gitRepoPath) });
-                            })
-                            .catch((err: unknown) => toast(String(err), 'error'));
-                        }
-                      }}
-                      onReset={(ref, mode) => {
-                        if (activeWorktree) {
-                          void api.reset(activeWorktree.path, ref, mode)
-                            .then(() => {
-                              toast(`Reset (${mode}) complete`, 'success');
-                              void qc.invalidateQueries({ queryKey: qk.commits(gitRepoPath) });
-                              void qc.invalidateQueries({ queryKey: qk.refs(gitRepoPath) });
-                            })
-                            .catch((err: unknown) => toast(String(err), 'error'));
-                        }
-                      }}
-                    />
-                    </div>
-                    {selectedCommit && (
-                      <CommitDiffPanel
-                        commit={selectedCommit}
-                        files={commitDiffFiles}
-                        loading={commitDiffLoading}
-                        selectedFile={commitDiffFile}
-                        diffContent={commitDiffContent}
-                        diffLoading={commitDiffFileLoading}
-                        onSelectFile={f => void loadCommitDiffFile(f)}
-                        onClose={() => {
-                          setSelectedCommits([]);
-                          setCommitDiffFiles([]);
-                          setCommitDiffContent('');
-                          setCommitDiffFile(null);
-                        }}
-                      />
-                    )}
-                  </div>
-                )}
-
-                {/* Staging tab */}
-                {activeTab === 'staging' && activeWorktree && (
-                  <StagingPanel
-                    worktreePath={activeWorktree.path}
-                    branch={activeWorktree.branch ?? null}
-                    refreshSignal={stagingRefresh}
-                    getStatus={p => api.getStatus(p)}
-                    stageFiles={(p, paths) => api.stageFiles(p, paths)}
-                    unstageFiles={(p, paths) => api.unstageFiles(p, paths)}
-                    createCommit={(p, msg) => api.createCommit(p, msg)}
-                    getDiff={(p, staged, file) =>
-                      staged
-                        ? api.getDiffContent(p, 'HEAD', file)
-                        : api.getWorkingDiff(p, file)
-                    }
-                    onCommit={() => {
-                      toast('Committed', 'success');
-                      setStagingRefresh(n => n + 1);
-                      void qc.invalidateQueries({ queryKey: qk.commits(gitRepoPath) });
-                      void qc.invalidateQueries({ queryKey: qk.commitCount(gitRepoPath) });
-                      void qc.invalidateQueries({ queryKey: qk.refs(gitRepoPath) });
-                    }}
-                    onClose={() => useWorkspaceStore.setState({ activeTab: 'graph' })}
-                    onToast={(msg, v) => toast(msg, v)}
-                  />
-                )}
-
-                {/* Terminal tab */}
-                {activeTab === 'terminal' && activeWorktree && (
-                  <div className="flex flex-col h-full">
-                    <div className="flex min-h-8 shrink-0 items-center gap-1 border-b border-(--sg-border) bg-(--sg-bg) px-1.5">
-                      <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto py-0.5" role="tablist" aria-label="Terminal sessions">
-                        {scopedTerminalSessions.map(s => {
-                          const isActive = s.id === scopedActiveTerminalId;
-                          const isRenaming = s.id === renamingTerminalId;
-                          return (
-                            <div
-                              key={s.id}
-                              className={`group relative flex shrink-0 items-center overflow-hidden rounded ${isActive ? 'bg-(--sg-surface-raised)' : 'hover:bg-(--sg-surface)'}`}
-                              onContextMenu={e => openTerminalTabMenu(e, s.id)}
-                            >
-                              {isActive && <span className="pointer-events-none absolute inset-x-1 bottom-0 h-0.5 rounded-t-full bg-(--sg-primary) shadow-[0_0_6px_var(--sg-primary)]" />}
-                              {isRenaming ? (
-                                <input
-                                  ref={renameInputRef}
-                                  data-testid="input-rename-terminal"
-                                  type="text"
-                                  value={renameValue}
-                                  onChange={e => setRenameValue(e.target.value)}
-                                  onBlur={commitTerminalRename}
-                                  onKeyDown={e => {
-                                    if (e.key === 'Enter') commitTerminalRename();
-                                    if (e.key === 'Escape') cancelTerminalRename();
-                                    e.stopPropagation();
-                                  }}
-                                  onClick={e => e.stopPropagation()}
-                                  className="min-w-0 w-25 rounded bg-(--sg-input-bg) px-2 py-1 text-[11px] font-medium text-(--sg-text) outline-(--sg-primary)"
-                                />
-                              ) : (
-                                <button
-                                  data-testid="terminal-session-tab"
-                                  data-session-label={s.label}
-                                  role="tab"
-                                  aria-selected={isActive}
-                                  className={`flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium ${isActive ? 'text-(--sg-primary)' : 'text-(--sg-text)'}`}
-                                  onClick={() => useWorkspaceStore.setState({ activeTerminalId: s.id, activeTab: 'terminal' })}
-                                >
-                                  <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${isActive ? 'bg-(--sg-primary)' : 'bg-(--sg-text-faint)'}`} />
-                                  <span className="max-w-35 truncate">{s.label}</span>
-                                </button>
-                              )}
-                              <button
-                                className="flex items-center px-1.5 text-(--sg-text-dim) transition-colors hover:text-(--sg-danger)"
-                                title={`Close ${s.label}`}
-                                onClick={e => {
-                                  e.stopPropagation();
-                                  void closeTerminal(s.id);
-                                }}
-                              >
-                                <X size={10} />
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                      <div className="relative inline-flex shrink-0 items-stretch rounded bg-(--sg-bg)">
-                        <button
-                          data-testid="btn-add-terminal"
-                          title="New terminal"
-                          className="flex items-center rounded px-2 py-1 text-(--sg-text-faint) transition-colors hover:bg-(--sg-surface-raised) hover:text-(--sg-text-dim)"
-                          onClick={() => void openTerminal(activeWorktree?.path ?? workspacePath, activeWorktree?.branch ?? undefined)}
-                        >
-                          <Plus size={13} />
-                        </button>
-                      </div>
-                      <div className="mx-0.5 h-3.5 w-px bg-(--sg-border)" />
-                      <div className="flex shrink-0 items-center gap-0.5 py-0.5">
-                        <button
-                          title="Tabbed"
-                          className={`rounded p-1 transition-colors ${terminalLayout === 'tabs' ? 'bg-(--sg-surface-raised) text-(--sg-primary)' : 'text-(--sg-text-faint) hover:bg-(--sg-surface-raised) hover:text-(--sg-text-dim)'}`}
-                          onClick={() => useWorkspaceStore.setState({ terminalLayout: 'tabs' })}
-                        >
-                          <Rows3 size={14} />
-                        </button>
-                        <button
-                          title="Split"
-                          className={`rounded p-1 transition-colors ${terminalLayout === 'split' ? 'bg-(--sg-surface-raised) text-(--sg-primary)' : 'text-(--sg-text-faint) hover:bg-(--sg-surface-raised) hover:text-(--sg-text-dim)'}`}
-                          onClick={() => useWorkspaceStore.setState({ terminalLayout: 'split' })}
-                        >
-                          <Columns2 size={14} />
-                        </button>
-                        <button
-                          title="Grid"
-                          className={`rounded p-1 transition-colors ${terminalLayout === 'grid' ? 'bg-(--sg-surface-raised) text-(--sg-primary)' : 'text-(--sg-text-faint) hover:bg-(--sg-surface-raised) hover:text-(--sg-text-dim)'}`}
-                          onClick={() => useWorkspaceStore.setState({ terminalLayout: 'grid' })}
-                        >
-                          <LayoutGrid size={14} />
-                        </button>
-                      </div>
-                    </div>
-                    <div className={terminalWrapperClass()}>
-                    {scopedTerminalSessions.map(s => (
-                      <div
-                        key={s.id}
-                        className={`h-full min-h-0 min-w-0 ${terminalLayout !== 'tabs' ? 'border-r border-(--sg-border) last:border-r-0 nth-[2n]:border-r-0 nth-[n+3]:border-t nth-[n+3]:border-(--sg-border)' : ''}`}
-                        style={terminalPanelStyle(s.id)}
-                      >
-                        <TerminalPane
-                          sessionId={s.id}
-                          incomingData={s.pendingData}
-                          className="h-full w-full"
-                          onData={(id, data) => { void api.writeTerminal(id, data); }}
-                          onResize={(id, cols, rows) => { void api.resizeTerminal(id, cols, rows); }}
+            {/* Tab content */}
+            <div className="flex-1 overflow-hidden relative">
+              {loading ? (
+                <div className="flex items-center justify-center h-full">
+                  <Spinner size="lg" />
+                </div>
+              ) : (
+                <>
+                  {/* Graph tab */}
+                  {activeTab === 'graph' && (
+                    <div className="flex flex-col h-full">
+                      <div className={selectedCommit ? 'h-1/2 min-h-0 overflow-hidden flex flex-col' : 'flex-1 min-h-0 overflow-hidden flex flex-col'}>
+                        <CommitGraph
+                          commits={commits}
+                          worktrees={worktrees}
+                          activeWorktree={activeWorktree}
+                          hasMore={commits.length < commitTotal}
+                          loadingMore={commitsFetching && commits.length > 0}
+                          onLoadMore={async () => {
+                            const more = await api.getCommitGraph({
+                              repoPath: gitRepoPath,
+                              limit: 500,
+                              skip: commits.length,
+                            }) as CommitEntry[];
+                            qc.setQueryData<CommitEntry[]>(qk.commits(gitRepoPath), prev => [
+                              ...(prev ?? []),
+                              ...more,
+                            ]);
+                          }}
+                          onSelect={selected => {
+                            const nextSelectionKey = selected.map(c => c.hash).join(',');
+                            const currentSelectionKey = selectedCommits.map(c => c.hash).join(',');
+                            if (nextSelectionKey === currentSelectionKey) {
+                              return;
+                            }
+                            if (selected.length === 1 && selected[0]) {
+                              void loadCommitDiff(selected[0]);
+                            } else if (selected.length === 2 && selected[0] && selected[1]) {
+                              void loadCommitRangeDiff(selected[0], selected[1]);
+                            } else {
+                              setSelectedCommits([]);
+                              setCommitDiffFiles([]);
+                              setCommitDiffContent('');
+                              setCommitDiffFile(null);
+                            }
+                          }}
+                          onCreateWorktree={() => {
+                            setShowNewWorktree(true);
+                          }}
+                          onCheckout={ref => {
+                            if (activeWorktree) {
+                              void api.checkout(activeWorktree.path, ref)
+                                .then(() => {
+                                  toast('Checked out', 'success');
+                                  void qc.invalidateQueries({ queryKey: qk.commits(gitRepoPath) });
+                                  void qc.invalidateQueries({ queryKey: qk.refs(gitRepoPath) });
+                                })
+                                .catch((err: unknown) => toast(String(err), 'error'));
+                            }
+                          }}
+                          onReset={(ref, mode) => {
+                            if (activeWorktree) {
+                              void api.reset(activeWorktree.path, ref, mode)
+                                .then(() => {
+                                  toast(`Reset (${mode}) complete`, 'success');
+                                  void qc.invalidateQueries({ queryKey: qk.commits(gitRepoPath) });
+                                  void qc.invalidateQueries({ queryKey: qk.refs(gitRepoPath) });
+                                })
+                                .catch((err: unknown) => toast(String(err), 'error'));
+                            }
+                          }}
                         />
                       </div>
-                    ))}
+                      {selectedCommit && (
+                        <CommitDiffPanel
+                          commit={selectedCommit}
+                          files={commitDiffFiles}
+                          loading={commitDiffLoading}
+                          selectedFile={commitDiffFile}
+                          diffContent={commitDiffContent}
+                          diffLoading={commitDiffFileLoading}
+                          onSelectFile={f => void loadCommitDiffFile(f)}
+                          onClose={() => {
+                            setSelectedCommits([]);
+                            setCommitDiffFiles([]);
+                            setCommitDiffContent('');
+                            setCommitDiffFile(null);
+                          }}
+                        />
+                      )}
                     </div>
-                  </div>
-                )}
-              </>
-            )}
+                  )}
+
+                  {/* Staging tab */}
+                  {activeTab === 'staging' && activeWorktree && (
+                    <StagingPanel
+                      worktreePath={activeWorktree.path}
+                      branch={activeWorktree.branch ?? null}
+                      refreshSignal={stagingRefresh}
+                      getStatus={p => api.getStatus(p)}
+                      stageFiles={(p, paths) => api.stageFiles(p, paths)}
+                      unstageFiles={(p, paths) => api.unstageFiles(p, paths)}
+                      createCommit={(p, msg) => api.createCommit(p, msg)}
+                      getDiff={(p, staged, file) =>
+                        staged
+                          ? api.getDiffContent(p, 'HEAD', file)
+                          : api.getWorkingDiff(p, file)
+                      }
+                      onCommit={() => {
+                        toast('Committed', 'success');
+                        setStagingRefresh(n => n + 1);
+                        void qc.invalidateQueries({ queryKey: qk.commits(gitRepoPath) });
+                        void qc.invalidateQueries({ queryKey: qk.commitCount(gitRepoPath) });
+                        void qc.invalidateQueries({ queryKey: qk.refs(gitRepoPath) });
+                      }}
+                      onClose={() => useWorkspaceStore.setState({ activeTab: 'graph' })}
+                      onToast={(msg, v) => toast(msg, v)}
+                    />
+                  )}
+
+                  {/* Terminal tab */}
+                  {activeTab === 'terminal' && activeWorktree && (
+                    <div className="flex flex-col h-full">
+                      <div className="flex min-h-8 shrink-0 items-center gap-1 border-b border-(--sg-border) bg-(--sg-bg) px-1.5">
+                        <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto py-0.5" role="tablist" aria-label="Terminal sessions">
+                          {scopedTerminalSessions.map(s => {
+                            const isActive = s.id === scopedActiveTerminalId;
+                            const isRenaming = s.id === renamingTerminalId;
+                            return (
+                              <div
+                                key={s.id}
+                                className={`group relative flex shrink-0 items-center overflow-hidden rounded ${isActive ? 'bg-(--sg-surface-raised)' : 'hover:bg-(--sg-surface)'}`}
+                                onContextMenu={e => openTerminalTabMenu(e, s.id)}
+                              >
+                                {isActive && <span className="pointer-events-none absolute inset-x-1 bottom-0 h-0.5 rounded-t-full bg-(--sg-primary) shadow-[0_0_6px_var(--sg-primary)]" />}
+                                {isRenaming ? (
+                                  <input
+                                    ref={renameInputRef}
+                                    data-testid="input-rename-terminal"
+                                    type="text"
+                                    value={renameValue}
+                                    onChange={e => setRenameValue(e.target.value)}
+                                    onBlur={commitTerminalRename}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') commitTerminalRename();
+                                      if (e.key === 'Escape') cancelTerminalRename();
+                                      e.stopPropagation();
+                                    }}
+                                    onClick={e => e.stopPropagation()}
+                                    className="min-w-0 w-25 rounded bg-(--sg-input-bg) px-2 py-1 text-[11px] font-medium text-(--sg-text) outline-(--sg-primary)"
+                                  />
+                                ) : (
+                                  <button
+                                    data-testid="terminal-session-tab"
+                                    data-session-label={s.label}
+                                    role="tab"
+                                    aria-selected={isActive}
+                                    className={`flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium ${isActive ? 'text-(--sg-primary)' : 'text-(--sg-text)'}`}
+                                    onClick={() => useWorkspaceStore.setState({ activeTerminalId: s.id, activeTab: 'terminal' })}
+                                  >
+                                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${isActive ? 'bg-(--sg-primary)' : 'bg-(--sg-text-faint)'}`} />
+                                    <span className="max-w-35 truncate">{s.label}</span>
+                                  </button>
+                                )}
+                                <button
+                                  className="flex items-center px-1.5 text-(--sg-text-dim) transition-colors hover:text-(--sg-danger)"
+                                  title={`Close ${s.label}`}
+                                  onClick={e => {
+                                    e.stopPropagation();
+                                    void closeTerminal(s.id);
+                                  }}
+                                >
+                                  <X size={10} />
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="relative inline-flex shrink-0 items-stretch rounded bg-(--sg-bg)">
+                          <button
+                            data-testid="btn-add-terminal"
+                            title="New terminal"
+                            className="flex items-center rounded px-2 py-1 text-(--sg-text-faint) transition-colors hover:bg-(--sg-surface-raised) hover:text-(--sg-text-dim)"
+                            onClick={() => void openTerminal(activeWorktree?.path ?? workspacePath, activeWorktree?.branch ?? undefined)}
+                          >
+                            <Plus size={13} />
+                          </button>
+                        </div>
+                        <div className="mx-0.5 h-3.5 w-px bg-(--sg-border)" />
+                        <div className="flex shrink-0 items-center gap-0.5 py-0.5">
+                          <button
+                            title="Tabbed"
+                            className={`rounded p-1 transition-colors ${terminalLayout === 'tabs' ? 'bg-(--sg-surface-raised) text-(--sg-primary)' : 'text-(--sg-text-faint) hover:bg-(--sg-surface-raised) hover:text-(--sg-text-dim)'}`}
+                            onClick={() => useWorkspaceStore.setState({ terminalLayout: 'tabs' })}
+                          >
+                            <Rows3 size={14} />
+                          </button>
+                          <button
+                            title="Split"
+                            className={`rounded p-1 transition-colors ${terminalLayout === 'split' ? 'bg-(--sg-surface-raised) text-(--sg-primary)' : 'text-(--sg-text-faint) hover:bg-(--sg-surface-raised) hover:text-(--sg-text-dim)'}`}
+                            onClick={() => useWorkspaceStore.setState({ terminalLayout: 'split' })}
+                          >
+                            <Columns2 size={14} />
+                          </button>
+                          <button
+                            title="Grid"
+                            className={`rounded p-1 transition-colors ${terminalLayout === 'grid' ? 'bg-(--sg-surface-raised) text-(--sg-primary)' : 'text-(--sg-text-faint) hover:bg-(--sg-surface-raised) hover:text-(--sg-text-dim)'}`}
+                            onClick={() => useWorkspaceStore.setState({ terminalLayout: 'grid' })}
+                          >
+                            <LayoutGrid size={14} />
+                          </button>
+                        </div>
+                      </div>
+                      <div className={terminalWrapperClass()}>
+                        {scopedTerminalSessions.map(s => (
+                          <div
+                            key={s.id}
+                            className={`h-full min-h-0 min-w-0 ${terminalLayout !== 'tabs' ? 'border-r border-(--sg-border) last:border-r-0 nth-[2n]:border-r-0 nth-[n+3]:border-t nth-[n+3]:border-(--sg-border)' : ''}`}
+                            style={terminalPanelStyle(s.id)}
+                          >
+                            <TerminalPane
+                              sessionId={s.id}
+                              incomingData={s.pendingData}
+                              className="h-full w-full"
+                              onData={(id, data) => { void api.writeTerminal(id, data); }}
+                              onResize={(id, cols, rows) => { void api.resizeTerminal(id, cols, rows); }}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
           </div>
-        </div>
         </div>{/* end body */}
       </div>
 

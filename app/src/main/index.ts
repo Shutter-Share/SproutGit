@@ -124,7 +124,7 @@ function createWindow(): BrowserWindow {
     height: 620,
     minWidth: 800,
     minHeight: 500,
-    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
     // Centre the traffic-light buttons vertically in our 38 px titlebar.
     ...(process.platform === 'darwin' && { trafficLightPosition: { x: 16, y: 12 } }),
     frame: process.platform !== 'darwin',
@@ -203,11 +203,14 @@ app.whenReady().then(() => {
     app.dock.setIcon(join(__dirname, '../../build/icon.png'));
   }
 
-  // Skip menu setup in E2E mode. On Linux with Xvfb, Menu.setApplicationMenu()
-  // can hang waiting for GTK menu initialization with no real desktop session.
-  // Clipboard shortcuts don't matter in automated tests.
-  if (!isE2EMode) {
+  // macOS: set the application menu so Cmd+C/V/Z/X work in text inputs.
+  // Windows/Linux: suppress the menu bar entirely (native bar is hidden, and
+  // Ctrl+C/V/Z are handled by the OS without a menu).
+  // Skip in E2E mode — on Linux, GTK menu init can hang with no real desktop.
+  if (process.platform === 'darwin' && !isE2EMode) {
     buildMenu();
+  } else {
+    Menu.setApplicationMenu(null);
   }
   if (isE2EMode) log.info('[e2e] skipped buildMenu, registering handlers');
 

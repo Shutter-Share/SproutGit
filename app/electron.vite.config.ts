@@ -11,6 +11,7 @@ const WORKSPACE_PACKAGES = [
   '@sproutgit/database',
   '@sproutgit/git',
   '@sproutgit/terminal',
+  '@sproutgit/provider-github',
 ];
 
 /**
@@ -59,6 +60,11 @@ export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin({ exclude: WORKSPACE_PACKAGES }), betterSqlite3Stub(), copyMigrationsPlugin()],
     build: {
+      watch: {
+        // Also watch workspace package sources so changes there trigger a
+        // main-process rebuild + Electron restart during `pnpm dev`.
+        include: ['src/main/**', '../packages/*/src/**'],
+      },
       rollupOptions: {
         // 'electron' is provided by the runtime; native modules cannot be bundled.
         external: ['electron', 'node-pty'],

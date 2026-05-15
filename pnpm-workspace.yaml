@@ -1,6 +1,7 @@
 packages:
   - app
   - packages/*
+  - packages/providers/*
   - e2e
   - website
 allowBuilds:

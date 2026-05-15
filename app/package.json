@@ -13,7 +13,8 @@
     "dist:linux": "electron-vite build && electron-builder --linux",
     "preview": "electron-vite preview",
     "typecheck": "tsgo --noEmit -p tsconfig.node.json && tsgo --noEmit -p tsconfig.web.json",
-    "start": "electron ."
+    "start": "electron .",
+    "postinstall": "node node_modules/electron/install.js"
   },
   "build": {
     "appId": "com.sproutgit.app",
@@ -82,6 +83,7 @@
     "@fontsource/fira-code": "^5.2.7",
     "@fontsource/plus-jakarta-sans": "^5.2.8",
     "@fontsource/space-grotesk": "^5.2.10",
+    "@sproutgit/provider-github": "workspace:*",
     "@sproutgit/database": "workspace:*",
     "@sproutgit/git": "workspace:*",
     "@sproutgit/terminal": "workspace:*",

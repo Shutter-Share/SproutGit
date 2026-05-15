@@ -331,7 +331,8 @@ function HomeView() {
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       >
         <WindowControls />
-        <span className="flex items-center gap-[6px] text-[13px] font-semibold text-(--sg-text) flex-1">
+        <span className="flex items-center gap-[6px] text-[13px] font-semibold text-(--sg-text) flex-1 pl-3">
+
           <img src={logoSvgUrl} alt="" width={18} height={18} />
           SproutGit
         </span>
@@ -343,44 +344,45 @@ function HomeView() {
             <Settings size={15} />
           </button>
         </div>
+        <WindowControls side="right" />
       </header>
 
       {/* Body */}
       <div className="flex flex-1 min-h-0">
         {/* H9: Resizable sidebar */}
         <ResizableSidebar initialWidth={240} minWidth={180} maxWidth={400}>
-        <aside className="flex flex-col h-full border-r border-(--sg-border) bg-(--sg-surface) overflow-y-auto">
-          <div className={sectionHeader}>
-            <Play size={11} strokeWidth={2.5} style={{ color: 'var(--sg-primary)' }} />
-            <span>Start</span>
-          </div>
-
-          <div className="flex flex-col gap-0.5 p-2">
-            <button className={actionBtn} data-testid="btn-clone" onClick={() => { setCloneError(''); setCloneProgress([]); setShowClone(true); }}>
-              <span className={actionIcon}><Download size={14} strokeWidth={2} /></span>
-              <span>Clone</span>
-              <ArrowRight size={13} className="ml-auto text-(--sg-text-faint) opacity-0 transition-opacity group-hover:opacity-100" />
-            </button>
-
-            <button className={actionBtn} data-testid="btn-open" disabled={opening} onClick={() => void openWithDialog()}>
-              <span className={actionIcon}>{opening ? <Spinner size="sm" /> : <FolderOpen size={14} strokeWidth={2} />}</span>
-              <span>{opening ? 'Opening…' : 'Open Folder'}</span>
-              <ArrowRight size={13} className="ml-auto text-(--sg-text-faint) opacity-0 transition-opacity group-hover:opacity-100" />
-            </button>
-
-            <button className={actionBtn} data-testid="btn-import" onClick={() => { setImportError(''); setShowImport(true); }}>
-              <span className={actionIcon}><FolderInput size={14} strokeWidth={2} /></span>
-              <span>Import Git Repo</span>
-              <ArrowRight size={13} className="ml-auto text-(--sg-text-faint) opacity-0 transition-opacity group-hover:opacity-100" />
-            </button>
-          </div>
-
-          {appVersion && (
-            <div className="mt-auto px-[14px] py-[10px] text-[10px] text-(--sg-text-faint) text-center">
-              SproutGit {appVersion}
+          <aside className="flex flex-col h-full border-r border-(--sg-border) bg-(--sg-surface) overflow-y-auto">
+            <div className={sectionHeader}>
+              <Play size={11} strokeWidth={2.5} style={{ color: 'var(--sg-primary)' }} />
+              <span>Start</span>
             </div>
-          )}
-        </aside>
+
+            <div className="flex flex-col gap-0.5 p-2">
+              <button className={actionBtn} data-testid="btn-clone" onClick={() => { setCloneError(''); setCloneProgress([]); setShowClone(true); }}>
+                <span className={actionIcon}><Download size={14} strokeWidth={2} /></span>
+                <span>Clone</span>
+                <ArrowRight size={13} className="ml-auto text-(--sg-text-faint) opacity-0 transition-opacity group-hover:opacity-100" />
+              </button>
+
+              <button className={actionBtn} data-testid="btn-open" disabled={opening} onClick={() => void openWithDialog()}>
+                <span className={actionIcon}>{opening ? <Spinner size="sm" /> : <FolderOpen size={14} strokeWidth={2} />}</span>
+                <span>{opening ? 'Opening…' : 'Open Folder'}</span>
+                <ArrowRight size={13} className="ml-auto text-(--sg-text-faint) opacity-0 transition-opacity group-hover:opacity-100" />
+              </button>
+
+              <button className={actionBtn} data-testid="btn-import" onClick={() => { setImportError(''); setShowImport(true); }}>
+                <span className={actionIcon}><FolderInput size={14} strokeWidth={2} /></span>
+                <span>Import Git Repo</span>
+                <ArrowRight size={13} className="ml-auto text-(--sg-text-faint) opacity-0 transition-opacity group-hover:opacity-100" />
+              </button>
+            </div>
+
+            {appVersion && (
+              <div className="mt-auto px-[14px] py-[10px] text-[10px] text-(--sg-text-faint) text-center">
+                SproutGit {appVersion}
+              </div>
+            )}
+          </aside>
         </ResizableSidebar>
 
         {/* Main */}
@@ -577,8 +579,8 @@ function HomeView() {
                     </div>
                     <div className="mt-0.5 text-(--sg-text-faint) text-[10.5px] leading-snug">
                       {mode === 'inPlace' ? 'Restructure the folder in-situ — repo becomes root in the same parent directory.' :
-                       mode === 'move' ? 'Move repo into a new SproutGit workspace folder and remove the original location.' :
-                       'Copy repo into a new SproutGit workspace folder and leave the original location untouched.'}
+                        mode === 'move' ? 'Move repo into a new SproutGit workspace folder and remove the original location.' :
+                          'Copy repo into a new SproutGit workspace folder and leave the original location untouched.'}
                     </div>
                   </button>
                 ))}
