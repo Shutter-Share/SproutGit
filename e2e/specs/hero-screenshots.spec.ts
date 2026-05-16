@@ -8,8 +8,8 @@
  * ─── How to run ──────────────────────────────────────────────────────────────
  *   CAPTURE_SCREENSHOTS=1 npx wdio run wdio.conf.ts --spec specs/hero-screenshots.spec.ts
  *
- * Screenshots are written to e2e/test-results/screenshots/ by default.
- * Override with SCREENSHOT_TARGET=<path>.
+ * Screenshots are written to e2e/test-results/screenshots/{mac|windows|linux}/ by default.
+ * Override the base directory with SCREENSHOT_TARGET=<path> (platform subfolder is appended automatically).
  * ─────────────────────────────────────────────────────────────────────────────
  *
  * Shot list:

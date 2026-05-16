@@ -17,6 +17,15 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 // ---------------------------------------------------------------------------
+// Platform detection
+// ---------------------------------------------------------------------------
+
+const PLATFORM_FOLDER =
+  process.platform === 'darwin' ? 'mac' :
+  process.platform === 'win32'  ? 'windows' :
+  'linux';
+
+// ---------------------------------------------------------------------------
 // Resolve output directory
 // ---------------------------------------------------------------------------
 
@@ -24,11 +33,11 @@ function resolveTargetDir(): string {
   const env =
     process.env['SCREENSHOT_TARGET'] ??
     process.env['PLAYWRIGHT_SCREENSHOT_TARGET'];
-  if (!env) {
-    // Default: e2e/test-results/screenshots/
-    return join(resolve(__dirname, '..'), 'test-results', 'screenshots');
-  }
-  return isAbsolute(env) ? env : resolve(process.cwd(), env);
+  const base = env
+    ? (isAbsolute(env) ? env : resolve(process.cwd(), env))
+    : join(resolve(__dirname, '..'), 'test-results', 'screenshots');
+  // Nest under a platform subfolder so mac/windows/linux shots are separate.
+  return join(base, PLATFORM_FOLDER);
 }
 
 function slug(value: string): string {
@@ -268,6 +277,9 @@ async function waitForUiSettle(timeout = 5_000): Promise<void> {
  *   dot 3 (zoom, green)   — box-shadow at +40 px
  */
 async function injectTrafficLights(): Promise<void> {
+  // Traffic-light dots are macOS-specific; on Windows/Linux the app renders
+  // its own window controls so no injection is needed.
+  if (process.platform !== 'darwin') return;
   await browser.execute(() => {
     if (document.getElementById('sg-traffic-light-style')) return;
     const style = document.createElement('style');
@@ -297,6 +309,7 @@ async function injectTrafficLights(): Promise<void> {
 }
 
 async function removeTrafficLights(): Promise<void> {
+  if (process.platform !== 'darwin') return;
   await browser.execute(() => {
     document.getElementById('sg-traffic-light-style')?.remove();
   });
