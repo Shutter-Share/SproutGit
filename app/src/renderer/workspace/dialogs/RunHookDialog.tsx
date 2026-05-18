@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Spinner } from '@sproutgit/ui';
 import type { WorktreeInfo, WorkspaceHook } from '@sproutgit/types';
 import { X } from 'lucide-react';
+import { secondaryBtn } from './dialog-classes.js';
 
 type Props = {
   target: WorktreeInfo | null;
@@ -13,7 +14,6 @@ type Props = {
 };
 
 const iconBtn = 'inline-flex items-center justify-center p-[3px] bg-transparent border-none cursor-pointer text-(--sg-text-faint) rounded-[4px] transition-colors hover:text-(--sg-text) hover:bg-(--sg-surface-raised) disabled:opacity-40 disabled:cursor-not-allowed';
-const secondaryBtn = 'inline-flex items-center gap-[5px] px-3 py-[5px] rounded-[6px] cursor-pointer text-xs font-medium transition-colors whitespace-nowrap bg-transparent border border-(--sg-border) text-(--sg-text-dim) hover:bg-(--sg-surface-raised) disabled:opacity-50 disabled:cursor-not-allowed';
 
 export function RunHookDialog({ target, workspacePath, activeWorktreePath, onClose, onToast }: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null);

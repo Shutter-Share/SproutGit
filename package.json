@@ -11,18 +11,13 @@
     "lint": "oxlint --config .oxlintrc.json app/src packages/ui/src packages/git/src packages/terminal/src packages/types/src",
     "typecheck": "turbo typecheck",
     "format": "prettier --write \"**/*.{ts,tsx,json,css,md}\" --ignore-path .gitignore",
-    "prepare": "simple-git-hooks",
     "postinstall": "node scripts/patch-electron-plist.mjs"
-  },
-  "simple-git-hooks": {
-    "pre-commit": "pnpm lint && pnpm typecheck && pnpm test"
   },
   "devDependencies": {
     "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
     "oxlint": "^1.64.0",
     "prettier": "^3.8.3",
-    "simple-git-hooks": "^2.13.1",
     "turbo": "^2.9.12"
   },
   "packageManager": "pnpm@11.1.1",

@@ -1,12 +1,2 @@
 #!/bin/sh
-
-if [ "$SKIP_SIMPLE_GIT_HOOKS" = "1" ]; then
-    echo "[INFO] SKIP_SIMPLE_GIT_HOOKS is set to 1, skipping hook."
-    exit 0
-fi
-
-if [ -f "$SIMPLE_GIT_HOOKS_RC" ]; then
-    . "$SIMPLE_GIT_HOOKS_RC"
-fi
-
-pnpm lint && pnpm typecheck
+node -e "require('child_process').execSync('pnpm lint && pnpm typecheck',{stdio:'inherit',shell:true})"

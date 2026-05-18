@@ -8,7 +8,7 @@ import {
   UpdateBadge,
 } from '@sproutgit/ui';
 import { GitBranch, RefreshCw, ArrowDownToLine, ArrowUpFromLine, Download, Plus, Sliders, Trash2, MoreHorizontal, FolderPen, FolderSearch, SquareTerminal, Play, Copy, CopyPlus } from 'lucide-react';
-import type { WorktreeInfo, WorkspaceStatus, WorktreePushStatus } from '@sproutgit/types';
+import type { WorktreeInfo, WorkspaceStatus } from '@sproutgit/types';
 import type { UpdateState } from '@sproutgit/ui';
 
 type Props = {
@@ -20,7 +20,6 @@ type Props = {
   fetching: boolean;
   pulling: boolean;
   pushing: boolean;
-  pushStatus: WorktreePushStatus | null;
   creatingWorktree: boolean;
   pendingCreationBranch: string | null;
   updateState: UpdateState;

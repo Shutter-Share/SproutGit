@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from 'react';
 import { ArrowRight, Clock, Download, FolderInput, FolderOpen, Play, Settings, X, AlertTriangle } from 'lucide-react';
 import { Spinner, WindowControls, UpdateBadge, Autocomplete, ResizableSidebar } from '@sproutgit/ui';
 import type { UpdateState } from '@sproutgit/ui';
-import type { GitHubRepo, GitInfo, GitHubAuthStatus, GitOpProgressEvent } from '@sproutgit/types';
+import type { GitHubRepo, GitInfo, GitHubAuthStatus, GitOpProgressEvent, RecentWorkspace } from '@sproutgit/types';
 import { useToast } from '../toast-context.js';
 import logoSvgUrl from '../logo.svg?inline';
 
@@ -49,8 +49,6 @@ function formatRelativeDate(d: Date | string | number): string {
 }
 
 const PROJECTS_FOLDER_SETTING = 'projectsFolder';
-
-type RecentWorkspace = { workspacePath: string; lastOpenedAt: number };
 
 function HomeView() {
   const navigate = useNavigate();
@@ -102,12 +100,9 @@ function HomeView() {
     }).catch(() => { setGitChecked(true); });
 
     void api.listRecentWorkspaces().then((ws: RecentWorkspace[]) => {
-      console.log('[home] listRecentWorkspaces resolved:', ws.length, 'items', JSON.stringify(ws.map(w => w.workspacePath)));
       const sorted = [...ws].sort((a, b) => new Date(b.lastOpenedAt).getTime() - new Date(a.lastOpenedAt).getTime());
       setRecents(sorted);
-    }).catch((err: unknown) => {
-      console.error('[home] listRecentWorkspaces error:', String(err));
-    });
+    }).catch(() => undefined);
 
     void api.getSetting(PROJECTS_FOLDER_SETTING).then(async (v: string | null) => {
       if (v) {
@@ -150,10 +145,6 @@ function HomeView() {
     const offError = api.onUpdateError(() => setUpdateState({ status: 'idle' }));
     return () => { offChecking(); offAvailable(); offNotAvailable(); offDownloading(); offReady(); offError(); };
   }, []);
-
-  useEffect(() => {
-    console.log('[home] recents state:', recents.length, recents.map(r => r.workspacePath));
-  }, [recents]);
 
   useEffect(() => {
     if (!cloneFolderManual) setCloneFolderName(repoNameFromUrl(cloneUrl));

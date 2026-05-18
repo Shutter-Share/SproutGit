@@ -2,6 +2,7 @@ import { api } from '../../api.js';
 import { useEffect, useRef, useState } from 'react';
 import { Spinner, Autocomplete } from '@sproutgit/ui';
 import type { RefInfo } from '@sproutgit/types';
+import { primaryBtn, secondaryBtn, fieldLabel, fieldInput } from './dialog-classes.js';
 
 type Props = {
   open: boolean;
@@ -14,11 +15,6 @@ type Props = {
   onCreated: (newWorktreePath: string) => void;
   onToast: (msg: string, variant: 'success' | 'error') => void;
 };
-
-const primaryBtn = 'inline-flex items-center gap-[5px] px-3 py-[5px] rounded-[6px] border-none cursor-pointer text-xs font-medium transition-colors whitespace-nowrap bg-(--sg-primary) text-white hover:bg-(--sg-primary-hover) disabled:opacity-50 disabled:cursor-not-allowed';
-const secondaryBtn = 'inline-flex items-center gap-[5px] px-3 py-[5px] rounded-[6px] cursor-pointer text-xs font-medium transition-colors whitespace-nowrap bg-transparent border border-(--sg-border) text-(--sg-text-dim) hover:bg-(--sg-surface-raised) disabled:opacity-50 disabled:cursor-not-allowed';
-const fieldLabel = 'text-[11px] font-semibold text-(--sg-text-dim) uppercase tracking-[0.04em]';
-const fieldInput = 'w-full px-[10px] py-[6px] bg-(--sg-input-bg) border border-(--sg-input-border) rounded-[6px] text-xs text-(--sg-text) outline-none focus:border-(--sg-input-focus)';
 
 function validateBranchName(name: string): string | null {
   const t = name.trim();

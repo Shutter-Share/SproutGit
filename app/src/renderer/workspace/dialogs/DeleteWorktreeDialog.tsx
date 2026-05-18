@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Spinner } from '@sproutgit/ui';
 import type { WorktreeInfo } from '@sproutgit/types';
+import { secondaryBtn } from './dialog-classes.js';
 
 type Props = {
   target: WorktreeInfo | null;
@@ -9,7 +10,6 @@ type Props = {
   onCancel: () => void;
 };
 
-const secondaryBtn = 'inline-flex items-center gap-[5px] px-3 py-[5px] rounded-[6px] cursor-pointer text-xs font-medium transition-colors whitespace-nowrap bg-transparent border border-(--sg-border) text-(--sg-text-dim) hover:bg-(--sg-surface-raised) disabled:opacity-50 disabled:cursor-not-allowed';
 const dangerBtn = 'inline-flex items-center gap-[5px] px-3 py-[5px] rounded-[6px] border-none cursor-pointer text-xs font-medium transition-colors whitespace-nowrap bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 disabled:cursor-not-allowed';
 
 export function DeleteWorktreeDialog({ target, loading, onConfirm, onCancel }: Props) {

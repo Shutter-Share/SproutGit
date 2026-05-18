@@ -21,7 +21,6 @@ export let configDb: ReturnType<typeof openConfigDb>;
 
 // Set the app name before the first window opens so the dock and menus show
 // "SproutGit" instead of "Electron" during development.
-app.name = 'SproutGit';
 app.setName('SproutGit');
 
 // In e2e test mode: use a per-PID directory for the config database so parallel

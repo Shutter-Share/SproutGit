@@ -1,6 +1,4 @@
 import { api } from './api.js';
-import { initRendererTelemetry } from './telemetry.js';
-initRendererTelemetry();
 
 import { StrictMode, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';

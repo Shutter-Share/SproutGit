@@ -844,7 +844,6 @@ function WorkspaceInner() {
             fetching={fetching}
             pulling={pulling}
             pushing={pushing}
-            pushStatus={pushStatus ?? null}
             creatingWorktree={creatingWorktree}
             pendingCreationBranch={pendingCreationBranch}
             updateState={updateState}
