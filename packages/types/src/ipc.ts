@@ -69,6 +69,8 @@ export const IPC = {
   // ── Hook execution ───────────────────────────────────────────────────────
   HOOK_RUN: 'hook:run',
   HOOK_RUN_SWITCH: 'hook:runSwitch',
+  HOOK_RUN_CREATE: 'hook:runCreate',
+  HOOK_RUN_TRIGGER: 'hook:runTrigger',
   HOOK_TOGGLE: 'hook:toggle',
   // ── System / editors / shells ─────────────────────────────────────────────
   SYSTEM_DETECT_EDITORS: 'system:detectEditors',
@@ -139,13 +141,14 @@ import type {
   WorktreePushStatus,
   RefsResult,
 } from './git.js';
-import type { WorkspaceInitResult, WorkspaceStatus, RecentWorkspace, WorktreeProvenance, NestedRepoSyncRule, ImportRepoMode } from './workspace.js';
+import type { WorkspaceInitResult, WorkspaceStatus, RecentWorkspace, WorktreeProvenance, NestedRepoSyncRule, ImportRepoMode, CreateWorktreeResult } from './workspace.js';
 import type {
   WorkspaceHook,
   WorkspaceHookScope,
   WorkspaceHookTrigger,
   HookExecutionTarget,
   WorkspaceHookShell,
+  WorktreeSwitchHookSource,
 } from './hooks.js';
 import type { EditorInfo, GitToolInfo } from './tools.js';
 import type { GitHubAuthStatus, DeviceCodeResponse, GitHubPollResult, GitHubEmailSuggestion, GitHubRepo } from './github.js';
@@ -205,7 +208,7 @@ export type IpcMap = {
   'git:getConfig':   { args: [key: string];                                                  result: string | null };
   'git:setConfig':   { args: [args: { key: string; value: string }];                         result: void };
   // ── Worktrees ─────────────────────────────────────────────────────────────
-  'worktree:create': { args: [args: { rootRepoPath: string; managedWorktreesPath: string; fromRef: string; newBranch: string }]; result: void };
+  'worktree:create': { args: [args: { rootRepoPath: string; managedWorktreesPath: string; fromRef: string; newBranch: string }]; result: CreateWorktreeResult };
   'worktree:delete': { args: [args: { rootRepoPath: string; worktreePath: string; deleteBranch: boolean; branchName?: string | null }];                      result: void };
   'worktree:getMeta':    { args: [args: { workspacePath: string; worktreePath: string }]; result: WorktreeMetaRow | null };
   'worktree:setMeta':    { args: [args: { workspacePath: string; worktreePath: string; branch?: string; sourceRef?: string; rootRepoPath?: string }]; result: void };
@@ -232,8 +235,10 @@ export type IpcMap = {
   'hook:delete':    { args: [args: { workspacePath: string; id: string }];                                   result: void };
   'hook:toggle':    { args: [args: { workspacePath: string; id: string; enabled: boolean }];                 result: void };
   'hook:run':       { args: [args: { workspacePath: string; hookId: string; worktreePath: string; trigger: WorkspaceHookTrigger; initiatingWorktreePath?: string | null }]; result: void };
-  'hook:runSwitch': { args: [args: { workspacePath: string; targetWorktreePath: string; initiatingWorktreePath?: string | null }]; result: void };
-  'hook:runLog':    { args: [args: HookRunLogArgs]; result: void };
+  'hook:runSwitch':   { args: [args: { workspacePath: string; targetWorktreePath: string; initiatingWorktreePath?: string | null; source?: WorktreeSwitchHookSource }]; result: void };
+  'hook:runCreate':   { args: [args: { workspacePath: string; newWorktreePath: string; initiatingWorktreePath?: string | null }]; result: void };
+  'hook:runTrigger':  { args: [args: { workspacePath: string; trigger: WorkspaceHookTrigger; worktreePath: string; initiatingWorktreePath?: string | null; source?: WorktreeSwitchHookSource }]; result: void };
+  'hook:runLog':      { args: [args: HookRunLogArgs]; result: void };
   // ── Terminal ──────────────────────────────────────────────────────────────
   'terminal:create': { args: [args: { cwd: string; shell?: string; label?: string; cols?: number; rows?: number }]; result: string };
   'terminal:write':  { args: [args: { id: string; data: string }];           result: void };

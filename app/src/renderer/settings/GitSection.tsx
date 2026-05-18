@@ -1,3 +1,4 @@
+import { User, Code2, Diff, GitMerge, Pencil, GitBranch } from 'lucide-react';
 import { api } from '../api.js';
 import { useState, useEffect } from 'react';
 import type {
@@ -283,7 +284,9 @@ export function GitSection({ onToast, githubAuth }: Props) {
   return (
     <section className="rounded-lg border border-(--sg-border) bg-(--sg-surface)">
       <div className="border-b border-(--sg-border) px-5 py-4">
-        <h2 className="sg-heading text-sm font-semibold text-(--sg-primary)">Git Settings</h2>
+        <h2 className="sg-heading text-sm font-semibold text-(--sg-primary) flex items-center gap-1.5">
+          <GitBranch size={15} /> Git Settings
+        </h2>
         <p className="mt-1 text-xs text-(--sg-text-faint)">These update your global Git configuration.</p>
       </div>
 
@@ -296,17 +299,20 @@ export function GitSection({ onToast, githubAuth }: Props) {
           {/* Author identity */}
           <div className="px-5 py-4">
             <div className="flex items-start justify-between">
-              <div>
-                <p className="sg-heading text-xs font-semibold text-(--sg-text)">Author Identity</p>
-                <p className="text-[11px] text-(--sg-text-faint)">
-                  {currentGitName || '(not set)'} · {currentGitEmail || '(not set)'}
-                </p>
+              <div className="flex gap-2.5">
+                <div className="mt-0.5 shrink-0 text-(--sg-text-faint)"><User size={13} /></div>
+                <div>
+                  <p className="sg-heading text-xs font-semibold text-(--sg-text)">Author Identity</p>
+                  <p className="text-[11px] text-(--sg-text-faint)">
+                    {currentGitName || '(not set)'} · {currentGitEmail || '(not set)'}
+                  </p>
+                </div>
               </div>
               <button
                 className="inline-flex items-center gap-1 rounded border border-(--sg-border) px-2.5 py-1 text-xs text-(--sg-text-dim)"
                 onClick={() => setEditingAuthor(v => !v)}
               >
-                {editingAuthor ? 'Done' : 'Edit'}
+                {editingAuthor ? 'Done' : <><Pencil size={12} /> Edit</>}
               </button>
             </div>
             {editingAuthor && (
@@ -361,15 +367,18 @@ export function GitSection({ onToast, githubAuth }: Props) {
           {/* Editor */}
           <div className="px-5 py-4">
             <div className="flex items-start justify-between">
-              <div>
-                <p className="sg-heading text-xs font-semibold text-(--sg-text)">Editor</p>
-                <p className="text-[11px] text-(--sg-text-faint)">{editorDisplay?.name ?? '(not set)'}</p>
+              <div className="flex gap-2.5">
+                <div className="mt-0.5 shrink-0 text-(--sg-text-faint)"><Code2 size={13} /></div>
+                <div>
+                  <p className="sg-heading text-xs font-semibold text-(--sg-text)">Editor</p>
+                  <p className="text-[11px] text-(--sg-text-faint)">{editorDisplay?.name ?? '(not set)'}</p>
+                </div>
               </div>
               <button
                 className="inline-flex items-center gap-1 rounded border border-(--sg-border) px-2.5 py-1 text-xs text-(--sg-text-dim)"
                 onClick={() => setEditingEditor(v => !v)}
               >
-                {editingEditor ? 'Done' : 'Edit'}
+                {editingEditor ? 'Done' : <><Pencil size={12} /> Edit</>}
               </button>
             </div>
             {editingEditor && (
@@ -411,15 +420,18 @@ export function GitSection({ onToast, githubAuth }: Props) {
           {/* Diff tool */}
           <div className="px-5 py-4">
             <div className="flex items-start justify-between">
-              <div>
-                <p className="sg-heading text-xs font-semibold text-(--sg-text)">Diff Tool</p>
-                <p className="text-[11px] text-(--sg-text-faint)">{diffToolDisplay?.name ?? '(not set)'}</p>
+              <div className="flex gap-2.5">
+                <div className="mt-0.5 shrink-0 text-(--sg-text-faint)"><Diff size={13} /></div>
+                <div>
+                  <p className="sg-heading text-xs font-semibold text-(--sg-text)">Diff Tool</p>
+                  <p className="text-[11px] text-(--sg-text-faint)">{diffToolDisplay?.name ?? '(not set)'}</p>
+                </div>
               </div>
               <button
                 className="inline-flex items-center gap-1 rounded border border-(--sg-border) px-2.5 py-1 text-xs text-(--sg-text-dim)"
                 onClick={() => setEditingDiffTool(v => !v)}
               >
-                {editingDiffTool ? 'Done' : 'Edit'}
+                {editingDiffTool ? 'Done' : <><Pencil size={12} /> Edit</>}
               </button>
             </div>
             {editingDiffTool && (
@@ -456,15 +468,18 @@ export function GitSection({ onToast, githubAuth }: Props) {
           {/* Merge tool */}
           <div className="px-5 py-4">
             <div className="flex items-start justify-between">
-              <div>
-                <p className="sg-heading text-xs font-semibold text-(--sg-text)">Merge Tool</p>
-                <p className="text-[11px] text-(--sg-text-faint)">{mergeToolDisplay?.name ?? '(not set)'}</p>
+              <div className="flex gap-2.5">
+                <div className="mt-0.5 shrink-0 text-(--sg-text-faint)"><GitMerge size={13} /></div>
+                <div>
+                  <p className="sg-heading text-xs font-semibold text-(--sg-text)">Merge Tool</p>
+                  <p className="text-[11px] text-(--sg-text-faint)">{mergeToolDisplay?.name ?? '(not set)'}</p>
+                </div>
               </div>
               <button
                 className="inline-flex items-center gap-1 rounded border border-(--sg-border) px-2.5 py-1 text-xs text-(--sg-text-dim)"
                 onClick={() => setEditingMergeTool(v => !v)}
               >
-                {editingMergeTool ? 'Done' : 'Edit'}
+                {editingMergeTool ? 'Done' : <><Pencil size={12} /> Edit</>}
               </button>
             </div>
             {editingMergeTool && (

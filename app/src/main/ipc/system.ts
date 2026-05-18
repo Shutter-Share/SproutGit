@@ -91,6 +91,12 @@ const KNOWN_GIT_TOOLS: Array<{
   supportsDiff: boolean;
   supportsMerge: boolean;
 }> = [
+  { id: 'vscode', name: 'VS Code', command: 'code', supportsDiff: true, supportsMerge: true },
+  { id: 'cursor', name: 'Cursor', command: 'cursor', supportsDiff: true, supportsMerge: true },
+  { id: 'windsurf', name: 'Windsurf', command: 'windsurf', supportsDiff: true, supportsMerge: true },
+  { id: 'kiro', name: 'Kiro', command: 'kiro', supportsDiff: true, supportsMerge: true },
+  { id: 'sublime', name: 'Sublime Text', command: 'subl', supportsDiff: true, supportsMerge: true },
+  { id: 'zed', name: 'Zed', command: 'zed', supportsDiff: true, supportsMerge: true },
   { id: 'vimdiff', name: 'Vimdiff', command: 'vim', supportsDiff: true, supportsMerge: true },
   { id: 'meld', name: 'Meld', command: 'meld', supportsDiff: true, supportsMerge: true },
   { id: 'kdiff3', name: 'KDiff3', command: 'kdiff3', supportsDiff: true, supportsMerge: true },

@@ -28,7 +28,9 @@ export async function createManagedWorktree(
 
   await git.raw(['worktree', 'add', '-b', newBranch, worktreePath, fromRef]);
 
-  return { worktreePath, branch: newBranch, fromRef };
+  // normalize() ensures consistent path separators on all platforms so the
+  // returned path matches what listWorktrees() returns (which also normalizes).
+  return { worktreePath: normalize(worktreePath), branch: newBranch, fromRef };
 }
 
 /**

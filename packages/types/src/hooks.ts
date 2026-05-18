@@ -68,12 +68,9 @@ export type HookProgressEvent = {
 };
 
 export type HookTerminalLaunchEvent = {
-  trigger: string;
+  terminalId: string;
   hookId: string;
   hookName: string;
-  shell: WorkspaceHookShell;
   cwd: string;
-  command: string;
-  envVars: Record<string, string>;
   keepOpenOnCompletion: boolean;
 };

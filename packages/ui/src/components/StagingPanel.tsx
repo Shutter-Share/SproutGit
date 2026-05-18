@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { X, Plus, Minus } from 'lucide-react';
+import { Plus, Minus, FilePlus, Pencil, FileMinus, FileText, File } from 'lucide-react';
 import hljs from 'highlight.js/lib/core';
 import typescriptLang from 'highlight.js/lib/languages/typescript';
 import javascriptLang from 'highlight.js/lib/languages/javascript';
@@ -92,6 +92,7 @@ export function StagingPanel({
       return result.files as StatusFileEntry[];
     },
     staleTime: 0, // always re-fetch when key changes
+    refetchInterval: 3_000, // poll for file changes not caught by the git watcher
     retry: 0,
     // Don't bubble status errors to the global QueryCache.onError toast —
     // transient failures (e.g. worktree deleted mid-flight) are self-healing.
@@ -268,24 +269,13 @@ export function StagingPanel({
   // ─── Render ────────────────────────────────────────────────────────────────
 
   const iconBtn = 'inline-flex items-center justify-center p-[3px] bg-transparent border-none cursor-pointer text-(--sg-text-faint) rounded-[4px] transition-colors hover:text-(--sg-text) hover:bg-(--sg-surface-raised) disabled:opacity-40 disabled:cursor-not-allowed';
-  const sectionHdr = 'flex items-center justify-between px-[10px] py-[5px] text-[11px] font-semibold text-(--sg-text-faint) uppercase tracking-[0.04em] shrink-0 border-b border-(--sg-border-subtle)';
+  const sectionHdr = 'flex items-center justify-between px-[10px] py-[5px] text-[11px] font-semibold text-(--sg-text-faint) uppercase tracking-[0.04em] shrink-0 border-b border-(--sg-border-subtle) bg-(--sg-surface)';
   const fileRow = (active: boolean) => `sg-file-row flex items-center gap-1.5 px-[10px] py-[3px] text-xs cursor-pointer transition-colors border-l-2 ${active ? 'bg-[color-mix(in_srgb,var(--sg-primary)_14%,transparent)] border-l-(--sg-primary)' : 'border-l-transparent hover:bg-(--sg-surface-raised)'}`;
 
   return (
     <div className="flex h-full overflow-hidden">
       {/* ── Left column: file lists + commit form ── */}
       <div className="shrink-0 flex flex-col overflow-hidden" style={{ width: leftWidth }}>
-        {/* Header — gradient with left accent rail, matching Svelte version */}
-        <div className="relative flex items-center justify-between border-b border-(--sg-border-subtle) bg-linear-to-b from-[color-mix(in_srgb,var(--sg-primary)_6%,transparent)] to-transparent px-4 py-2 shrink-0">
-          <span aria-hidden="true" className="absolute top-1.5 bottom-1.5 left-0 w-[2px] rounded-r-full bg-(--sg-primary)" />
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-(--sg-text-dim)">Changes</span>
-            {branch && <span className="font-mono text-[10px] text-(--sg-primary)">{branch}</span>}
-            {!loading && <span className="text-[10px] text-(--sg-text-faint)">· {statusFiles.length === 0 ? 'Clean' : `${statusFiles.length} file${statusFiles.length !== 1 ? 's' : ''}`}</span>}
-          </div>
-          <button className={iconBtn} onClick={onClose} title="Close"><X size={14} /></button>
-        </div>
-
         {loading ? (
           <div className="flex items-center justify-center flex-1"><Spinner /></div>
         ) : (
@@ -293,7 +283,7 @@ export function StagingPanel({
             {/* Scrollable file lists */}
             <div ref={listContainerRef} className="flex-1 min-h-0 flex flex-col overflow-hidden">
               {/* Unstaged files */}
-              <section className="min-h-0 overflow-y-auto" style={{ flex: `${unstagedRatio} 1 0%` }}>
+              <div className="min-h-0 flex flex-col" style={{ flex: `${unstagedRatio} 1 0%` }}>
                 <div className={sectionHdr}>
                   <span>Unstaged ({unstagedFiles.length})</span>
                   {unstagedFiles.length > 0 && (
@@ -302,38 +292,35 @@ export function StagingPanel({
                     </button>
                   )}
                 </div>
-                {unstagedFiles.length === 0 && (
-                  <p className="px-[10px] py-2 text-[11px] text-(--sg-text-faint) italic">No unstaged changes</p>
-                )}
-                {unstagedFiles.map(f => (
-                  <div
-                    key={f.path}
-                    data-testid="staging-unstaged-file-row"
-                    data-path={f.path}
-                    className={fileRow(diffFile === f.path && !diffStaged)}
-                    onClick={() => void loadDiff(f.path, false)}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={e => { if (e.key === 'Enter') void loadDiff(f.path, false); }}
-                  >
-                    <span
-                      className="font-(family-name:--sg-font-code) text-[11px] shrink-0 w-[14px]"
-                      style={{ color: fileStatusColor(f.workTreeStatus) }}
+                <div className="overflow-y-auto flex-1 min-h-0">
+                  {unstagedFiles.length === 0 && (
+                    <p className="px-[10px] py-2 text-[11px] text-(--sg-text-faint) italic">No unstaged changes</p>
+                  )}
+                  {unstagedFiles.map(f => (
+                    <div
+                      key={f.path}
+                      data-testid="staging-unstaged-file-row"
+                      data-path={f.path}
+                      className={fileRow(diffFile === f.path && !diffStaged)}
+                      onClick={() => void loadDiff(f.path, false)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={e => { if (e.key === 'Enter') void loadDiff(f.path, false); }}
                     >
-                      {f.workTreeStatus}
-                    </span>
-                    <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{f.path}</span>
-                    <button
-                      className={iconBtn}
-                      onClick={e => { e.stopPropagation(); stageOne.mutate(f.path); }}
-                      disabled={stageOne.isPending && stageOne.variables === f.path}
-                      title="Stage file"
-                    >
-                      {stageOne.isPending && stageOne.variables === f.path ? <Spinner size="sm" /> : <Plus size={12} />}
-                    </button>
-                  </div>
-                ))}
-              </section>
+                      <StatusIcon status={f.workTreeStatus} />
+                      <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{f.path}</span>
+                      <button
+                        className={iconBtn}
+                        onClick={e => { e.stopPropagation(); stageOne.mutate(f.path); }}
+                        disabled={stageOne.isPending && stageOne.variables === f.path}
+                        title="Stage file"
+                      >
+                        {stageOne.isPending && stageOne.variables === f.path ? <Spinner size="sm" /> : <Plus size={12} />}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
 
               <div
                 className="h-1 shrink-0 cursor-row-resize bg-(--sg-border) hover:bg-(--sg-primary) active:bg-(--sg-primary) transition-colors"
@@ -344,7 +331,7 @@ export function StagingPanel({
               />
 
               {/* Staged files */}
-              <section className="min-h-0 overflow-y-auto border-t border-(--sg-border)" style={{ flex: `${1 - unstagedRatio} 1 0%` }}>
+              <div className="min-h-0 flex flex-col border-t border-(--sg-border)" style={{ flex: `${1 - unstagedRatio} 1 0%` }}>
                 <div className={sectionHdr}>
                   <span>Staged ({stagedFiles.length})</span>
                   {stagedFiles.length > 0 && (
@@ -353,38 +340,37 @@ export function StagingPanel({
                     </button>
                   )}
                 </div>
-                {stagedFiles.length === 0 && (
-                  <p className="px-[10px] py-2 text-[11px] text-(--sg-text-faint) italic">No staged changes</p>
-                )}
-                {stagedFiles.map(f => (
-                  <div
-                    key={f.path}
-                    data-testid="staging-staged-file-row"
-                    data-path={f.path}
-                    className={fileRow(diffFile === f.path && diffStaged)}
-                    onClick={() => void loadDiff(f.path, true)}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={e => { if (e.key === 'Enter') void loadDiff(f.path, true); }}
-                  >
-                    <span
-                      className="sg-file-status--staged font-(family-name:--sg-font-code) text-[11px] shrink-0 w-[14px] text-(--sg-primary)"
-                      data-status={f.indexStatus}
+                <div className="overflow-y-auto flex-1 min-h-0">
+                  {stagedFiles.length === 0 && (
+                    <p className="px-[10px] py-2 text-[11px] text-(--sg-text-faint) italic">No staged changes</p>
+                  )}
+                  {stagedFiles.map(f => (
+                    <div
+                      key={f.path}
+                      data-testid="staging-staged-file-row"
+                      data-path={f.path}
+                      className={fileRow(diffFile === f.path && diffStaged)}
+                      onClick={() => void loadDiff(f.path, true)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={e => { if (e.key === 'Enter') void loadDiff(f.path, true); }}
                     >
-                      {f.indexStatus}
-                    </span>
-                    <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{f.path}</span>
-                    <button
-                      className={iconBtn}
-                      onClick={e => { e.stopPropagation(); unstageOne.mutate(f.path); }}
-                      disabled={unstageOne.isPending && unstageOne.variables === f.path}
-                      title="Unstage file"
-                    >
-                      {unstageOne.isPending && unstageOne.variables === f.path ? <Spinner size="sm" /> : <Minus size={12} />}
-                    </button>
-                  </div>
-                ))}
-              </section>
+                      <span className="sg-file-status--staged inline-flex shrink-0" data-status={f.indexStatus}>
+                        <StatusIcon status={f.indexStatus} />
+                      </span>
+                      <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap">{f.path}</span>
+                      <button
+                        className={iconBtn}
+                        onClick={e => { e.stopPropagation(); unstageOne.mutate(f.path); }}
+                        disabled={unstageOne.isPending && unstageOne.variables === f.path}
+                        title="Unstage file"
+                      >
+                        {unstageOne.isPending && unstageOne.variables === f.path ? <Spinner size="sm" /> : <Minus size={12} />}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
 
             {/* Commit area */}
@@ -409,11 +395,11 @@ export function StagingPanel({
                 className="sg-btn--primary mt-1 flex w-full items-center justify-center gap-2 rounded bg-(--sg-primary) px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-(--sg-primary-hover) disabled:cursor-not-allowed disabled:opacity-40 border-none cursor-pointer transition-colors"
                 onClick={() => handleCommit()}
                 disabled={commitMutation.isPending || stagedFiles.length === 0}
-                title={stagedFiles.length === 0 ? 'Stage changes first' : 'Commit staged changes (⌘↵)'}
+                title={stagedFiles.length === 0 ? 'Stage changes first' : `Commit staged changes (${/mac/i.test(navigator.platform) ? '⌘↵' : 'Ctrl+Enter'})`}
               >
                 {commitMutation.isPending ? <><Spinner size="sm" /> Committing…</> : `Commit${stagedFiles.length > 0 ? ` (${stagedFiles.length} file${stagedFiles.length !== 1 ? 's' : ''})` : ''}`}
               </button>
-              <p className="text-center text-[9px] text-(--sg-text-faint) m-0">⌘↵ to commit</p>
+              <p className="text-center text-[9px] text-(--sg-text-faint) m-0">{/mac/i.test(navigator.platform) ? '⌘↵' : 'Ctrl+Enter'} to commit</p>
             </section>
           </>
         )}
@@ -505,6 +491,15 @@ function highlightCode(code: string, language: string | null): string {
   } catch {
     return escapeHtml(code);
   }
+}
+
+function StatusIcon({ status }: { status: string }) {
+  const color = fileStatusColor(status);
+  if (status === '?' || status === 'A') return <FilePlus size={12} style={{ color }} className="shrink-0" />;
+  if (status === 'M' || status === 'U') return <Pencil size={12} style={{ color }} className="shrink-0" />;
+  if (status === 'D') return <FileMinus size={12} style={{ color }} className="shrink-0" />;
+  if (status === 'R') return <FileText size={12} style={{ color }} className="shrink-0" />;
+  return <File size={12} style={{ color: 'var(--sg-text-faint)' }} className="shrink-0" />;
 }
 
 function fileStatusColor(status: string): string {

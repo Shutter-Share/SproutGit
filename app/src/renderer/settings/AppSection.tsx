@@ -1,3 +1,4 @@
+import { Info } from 'lucide-react';
 import { api } from '../api.js';
 import { useState, useEffect } from 'react';
 import type { GitInfo } from '@sproutgit/types';
@@ -82,7 +83,9 @@ export function AppSection({ onToast: _onToast }: Props) {
 
   return (
     <section className="rounded-lg border border-(--sg-border) bg-(--sg-surface) p-5">
-      <h2 className="sg-heading mb-3 text-sm font-semibold text-(--sg-primary)">About</h2>
+      <h2 className="sg-heading mb-3 text-sm font-semibold text-(--sg-primary) flex items-center gap-1.5">
+        <Info size={15} /> About
+      </h2>
       <div className="space-y-1.5 text-xs text-(--sg-text-dim)">
         <div className="flex justify-between">
           <span>SproutGit version</span>

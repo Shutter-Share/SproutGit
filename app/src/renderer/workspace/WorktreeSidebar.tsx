@@ -36,7 +36,7 @@ type Props = {
   onDeleteWorktree: (wt: WorktreeInfo) => void;
 };
 
-const iconBtn = 'inline-flex items-center justify-center p-[3px] bg-transparent border-none cursor-pointer text-(--sg-text-faint) rounded-[4px] transition-colors hover:text-(--sg-text) hover:bg-(--sg-surface-raised) disabled:opacity-40 disabled:cursor-not-allowed';
+const iconBtn = 'inline-flex items-center justify-center p-1.5 bg-transparent border-none cursor-pointer text-(--sg-text-faint) rounded-[4px] transition-colors hover:text-(--sg-text) hover:bg-(--sg-surface-raised) disabled:opacity-40 disabled:cursor-not-allowed';
 
 function isPersistentBranch(branch: string | null) {
   return /^(main|master|develop|release\/.+)$/.test(branch ?? '');
@@ -115,12 +115,12 @@ export function WorktreeSidebar({
   const activeDirty = activeWorktree ? (worktreeChangeCounts[activeWorktree.path] ?? 0) : 0;
 
   return (
-    <ResizableSidebar initialWidth={220} minWidth={160} maxWidth={360} className="border-r border-(--sg-border)">
-      <div className="flex flex-col h-full">
+    <ResizableSidebar initialWidth={330} minWidth={200} maxWidth={480} className="border-r border-(--sg-border)">
+      <div className="flex flex-col h-full bg-(--sg-surface)">
         {/* Compact icon toolbar */}
-        <div className="flex items-center gap-1 border-b border-(--sg-border-subtle) px-2 h-9 bg-(--sg-surface) shrink-0">
+        <div className="flex items-center gap-1.5 border-b border-(--sg-border-subtle) px-2.5 h-10 bg-(--sg-surface) shrink-0">
           <button
-            className="flex items-center gap-1 rounded-lg bg-(--sg-primary) px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-(--sg-primary-hover) border-none cursor-pointer"
+            className="flex items-center gap-1 rounded-lg bg-(--sg-primary) px-2.5 py-1 text-xs font-semibold text-white hover:bg-(--sg-primary-hover) border-none cursor-pointer"
             onClick={onNewWorktree}
             title="New worktree"
             data-testid="btn-open-create-worktree"
@@ -229,7 +229,7 @@ export function WorktreeSidebar({
                         .catch((err: unknown) => toast(String(err), 'error')),
                     },
                     {
-                      label: 'Reveal in Finder',
+                      label: /mac/i.test(navigator.platform) ? 'Reveal in Finder' : 'Reveal in Explorer',
                       icon: <FolderSearch size={14} />,
                       onClick: () => void api.revealInFinder(row.wt.path)
                         .catch((err: unknown) => toast(String(err), 'error')),
@@ -295,7 +295,7 @@ export function WorktreeSidebar({
                       e.stopPropagation();
                       contextMenu.open(e, [
                         { label: 'Open in Editor', icon: <FolderPen size={14} />, onClick: () => void api.openInEditor(row.wt.path).then(() => toast('Opened in editor', 'success')).catch((err: unknown) => toast(String(err), 'error')) },
-                        { label: 'Reveal in Finder', icon: <FolderSearch size={14} />, onClick: () => void api.revealInFinder(row.wt.path).catch((err: unknown) => toast(String(err), 'error')) },
+                        { label: /mac/i.test(navigator.platform) ? 'Reveal in Finder' : 'Reveal in Explorer', icon: <FolderSearch size={14} />, onClick: () => void api.revealInFinder(row.wt.path).catch((err: unknown) => toast(String(err), 'error')) },
                         { label: 'Open Terminal Here', icon: <SquareTerminal size={14} />, onClick: () => onOpenTerminal(row.wt.path, row.wt.branch ?? row.wt.path.split('/').pop()) },
                         'separator',
                         { label: 'Run Hook…', icon: <Play size={14} />, onClick: () => onOpenRunHookModal(row.wt) },

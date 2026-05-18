@@ -129,6 +129,9 @@ function createWindow(): BrowserWindow {
     ...(process.platform === 'darwin' && { trafficLightPosition: { x: 16, y: 12 } }),
     frame: process.platform !== 'darwin',
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1e1e2e' : '#f5f5f5',
+    // Override the default Electron icon on Windows/Linux with the SproutGit logo.
+    // On macOS the dock icon is set separately via app.dock.setIcon() after ready.
+    ...(process.platform !== 'darwin' && { icon: join(__dirname, '../../build/icon.png') }),
     show: false,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),

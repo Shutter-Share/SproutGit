@@ -3,8 +3,6 @@ import type { WorktreeInfo } from '@sproutgit/types';
 
 export type Tab = 'graph' | 'staging' | 'terminal';
 export type TerminalLayout = 'tabs' | 'split' | 'grid';
-export type HookStatus = 'pending' | 'running' | 'success' | 'error' | 'skipped' | 'timed_out';
-export type OpHookEntry = { hookId: string; hookName: string; status: HookStatus };
 export type TerminalSession = { id: string; label: string; pendingData: string; cwd: string };
 
 interface WorkspaceUiState {
@@ -23,11 +21,8 @@ interface WorkspaceUiState {
   terminalSessions: TerminalSession[];
   activeTerminalId: string | null;
   terminalLayout: TerminalLayout;
-  // Hook progress overlay
-  opTitle: string | null;
-  opHooks: OpHookEntry[];
-  opLogs: string[];
-  opCompleted: boolean;
+  /** Saves the last-active terminal ID per worktree path for save/restore on switch. */
+  worktreeActiveTerminalId: Record<string, string | null>;
   // Pending worktree creation
   pendingCreationBranch: string | null;
   creatingWorktree: boolean;
@@ -53,10 +48,7 @@ const baseUiState: Omit<WorkspaceUiState, 'workspacePath'> = {
   terminalSessions: [],
   activeTerminalId: null,
   terminalLayout: readInitialTerminalLayout(),
-  opTitle: null,
-  opHooks: [],
-  opLogs: [],
-  opCompleted: false,
+  worktreeActiveTerminalId: {},
   pendingCreationBranch: null,
   creatingWorktree: false,
 };
@@ -66,8 +58,26 @@ export const useWorkspaceStore = create<WorkspaceUiState>()(() => ({
   ...baseUiState,
 }));
 
-/** Reset UI state when switching to a new workspace. */
+/** Reset UI state when switching to a new workspace.
+ *  When returning to the same workspace (e.g. navigating back from the Projects screen)
+ *  terminal sessions are preserved so PTY sessions survive navigation. */
 export function resetWorkspaceStore(workspacePath: string) {
-  useWorkspaceStore.setState({ workspacePath, ...baseUiState, activeTab: readInitialTab() });
+  const current = useWorkspaceStore.getState();
+  if (current.workspacePath === workspacePath) {
+    // Same workspace — reset only non-terminal UI state so live sessions survive.
+    useWorkspaceStore.setState({
+      activeWorktree: null,
+      activeTab: readInitialTab(),
+      fetching: false,
+      pulling: false,
+      pushing: false,
+      defaultShell: '',
+      pendingCreationBranch: null,
+      creatingWorktree: false,
+    });
+  } else {
+    // Different workspace — full reset (including terminal sessions).
+    useWorkspaceStore.setState({ workspacePath, ...baseUiState, activeTab: readInitialTab() });
+  }
 }
 

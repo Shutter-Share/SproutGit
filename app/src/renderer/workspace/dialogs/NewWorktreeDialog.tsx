@@ -6,10 +6,12 @@ import type { RefInfo } from '@sproutgit/types';
 type Props = {
   open: boolean;
   workspacePath: string;
+  gitRepoPath: string;
   managedWorktreesPath: string;
   refs: RefInfo[];
   onClose: () => void;
-  onCreated: () => void;
+  onBeforeCreate?: () => Promise<void>;
+  onCreated: (newWorktreePath: string) => void;
   onToast: (msg: string, variant: 'success' | 'error') => void;
 };
 
@@ -37,7 +39,7 @@ function validateBranchName(name: string): string | null {
   return null;
 }
 
-export function NewWorktreeDialog({ open, workspacePath, managedWorktreesPath, refs, onClose, onCreated, onToast }: Props) {
+export function NewWorktreeDialog({ open, workspacePath, gitRepoPath, managedWorktreesPath, refs, onClose, onBeforeCreate, onCreated, onToast }: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -67,8 +69,9 @@ export function NewWorktreeDialog({ open, workspacePath, managedWorktreesPath, r
     setCreating(true);
     onClose(); // Optimistically close; pending branch shown in sidebar
     try {
-      await api.createWorktree({
-        rootRepoPath: workspacePath,
+      if (onBeforeCreate) await onBeforeCreate();
+      const result = await api.createWorktree({
+        rootRepoPath: gitRepoPath,
         managedWorktreesPath,
         fromRef: branchFrom || 'HEAD',
         newBranch: branchName.trim(),
@@ -77,7 +80,7 @@ export function NewWorktreeDialog({ open, workspacePath, managedWorktreesPath, r
       setBranchName('');
       setBranchFrom('HEAD');
       setBranchType('managed');
-      onCreated();
+      onCreated(result.worktreePath);
     } catch (err) {
       onToast(`Failed: ${String(err)}`, 'error');
     } finally {

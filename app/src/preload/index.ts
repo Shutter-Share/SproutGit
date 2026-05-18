@@ -33,6 +33,8 @@ import type {
   WorktreeProvenance,
   NestedRepoSyncRule,
   RecentWorkspace,
+  CreateWorktreeResult,
+  WorktreeSwitchHookSource,
 } from '@sproutgit/types';
 
 /**
@@ -74,7 +76,7 @@ const api = {
     managedWorktreesPath: string;
     fromRef: string;
     newBranch: string;
-  }): Promise<void> =>
+  }): Promise<CreateWorktreeResult> =>
     invoke(IPC.WORKTREE_CREATE, args),
 
   deleteWorktree: (args: {
@@ -312,8 +314,25 @@ const api = {
     workspacePath: string;
     targetWorktreePath: string;
     initiatingWorktreePath?: string | null;
+    source?: WorktreeSwitchHookSource;
   }): Promise<void> =>
     invoke(IPC.HOOK_RUN_SWITCH, args),
+
+  runCreateHooks: (args: {
+    workspacePath: string;
+    newWorktreePath: string;
+    initiatingWorktreePath?: string | null;
+  }): Promise<void> =>
+    invoke(IPC.HOOK_RUN_CREATE, args),
+
+  runTriggerHooks: (args: {
+    workspacePath: string;
+    trigger: WorkspaceHookTrigger;
+    worktreePath: string;
+    initiatingWorktreePath?: string | null;
+    source?: WorktreeSwitchHookSource;
+  }): Promise<void> =>
+    invoke(IPC.HOOK_RUN_TRIGGER, args),
 
   logHookRun: (args: {
     workspacePath: string;

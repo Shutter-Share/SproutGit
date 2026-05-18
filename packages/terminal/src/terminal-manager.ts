@@ -52,12 +52,31 @@ export class TerminalManager {
     const shellBin = resolveShellBin(shell);
     const safeCwd = existsSync(cwd) ? cwd : process.cwd();
 
+    // Strip lifecycle variables injected by the dev-server launcher (e.g.
+    // `npm_lifecycle_event`, `npm_package_*`, `INIT_CWD`). These are specific
+    // to the outer `pnpm dev` invocation and should not leak into terminal
+    // sessions where they could confuse package managers or build tools.
+    const baseEnv: Record<string, string> = {};
+    for (const [k, v] of Object.entries(process.env)) {
+      if (v === undefined) continue;
+      if (k.startsWith('npm_') || k === 'INIT_CWD') continue;
+      baseEnv[k] = v;
+    }
+
     const proc = pty.spawn(shellBin, [], {
       name: 'xterm-256color',
       cwd: safeCwd,
-      env: { ...process.env, ...env } as Record<string, string>,
+      env: {
+        ...baseEnv,
+        ...env,
+      },
       cols,
       rows,
+      // Force ConPTY on Windows so the PTY session is fully isolated from any
+      // console the Electron process inherited (e.g. the pnpm dev terminal).
+      // Without this, node-pty may fall back to WinPTY which leaks output to
+      // the parent console.
+      ...(process.platform === 'win32' && { useConpty: true }),
     });
 
     proc.onData(data => this.onData(id, data));
@@ -159,30 +178,46 @@ export class TerminalManagerWithMeta extends TerminalManager {
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
 function resolveShellBin(shell: string): string {
-  const value = shell.trim();
-  if (!value) return '/bin/zsh';
+  const isWindows = process.platform === 'win32';
+  const unixDefault = '/bin/zsh';
+  const winDefault = 'powershell.exe';
+  const platformDefault = isWindows ? winDefault : unixDefault;
 
-  // Some persisted settings accidentally include args (e.g. "zsh -l").
-  const executable = value.split(/\s+/)[0] ?? value;
+  const value = shell.trim();
+  if (!value) return platformDefault;
+
+  // Only strip trailing args (e.g. "zsh -l" → "zsh") for short command names.
+  // Absolute paths like "C:\Program Files\PowerShell\7\pwsh.exe" must not be
+  // split on whitespace — they contain spaces in directory names.
+  const isAbsolutePath = /^([A-Za-z]:[\\/]|\/)/.test(value);
+  const executable = isAbsolutePath ? value : (value.split(/\s+/)[0] ?? value);
 
   switch (executable) {
     case 'zsh':
-      return '/bin/zsh';
+      return isWindows ? winDefault : '/bin/zsh';
     case 'bash':
-      return '/bin/bash';
+      return isWindows ? winDefault : '/bin/bash';
     case 'pwsh':
       return 'pwsh';
     case 'powershell':
+    case 'powershell.exe':
       return 'powershell.exe';
+    case 'cmd':
+    case 'cmd.exe':
+      return 'cmd.exe';
     default:
-      // Full path passed directly (e.g. '/bin/zsh' from settings)
+      // Full path passed directly (e.g. '/bin/zsh' or 'C:\Program Files\...\pwsh.exe')
       if (executable.startsWith('/')) {
         try {
           accessSync(executable, constants.X_OK);
           return executable;
         } catch {
-          return '/bin/zsh';
+          return platformDefault;
         }
+      }
+      // Windows absolute path — return as-is and let node-pty resolve it
+      if (/^[A-Za-z]:[\\/]/.test(executable)) {
+        return executable;
       }
       return executable;
   }

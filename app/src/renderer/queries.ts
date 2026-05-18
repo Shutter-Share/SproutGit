@@ -9,6 +9,7 @@ import { api } from './api.js';
 
 import {
   useQuery,
+  useQueries,
   useMutation,
   useQueryClient,
   type UseQueryOptions,
@@ -118,23 +119,34 @@ export function useWorktreeStatus(worktreePath: string | undefined) {
 
 // ── Worktree change counts (badge numbers in sidebar) ─────────────────────────
 
+/**
+ * Actively fetches git status for every non-root worktree and returns a map
+ * of { [worktreePath]: changedFileCount }.  Uses useQueries so each worktree
+ * gets its own TanStack Query entry (shared cache with the staging panel).
+ */
 export function useWorktreeChangeCounts(
-  gitRepoPath: string,
   worktrees: WorktreeInfo[],
   rootPath?: string,
 ) {
-  const qc = useQueryClient();
+  const targets = worktrees.filter(w => w.path !== rootPath && !!w.path);
 
-  // Fan out individual status queries for non-root worktrees
-  const targets = worktrees.filter(w => w.path !== rootPath);
+  const results = useQueries({
+    queries: targets.map(wt => ({
+      queryKey: qk.worktreeStatus(wt.path),
+      queryFn: async () => {
+        const result = await api.getStatus(wt.path) as { files: import('@sproutgit/types').StatusFileEntry[] };
+        return result.files;
+      },
+      staleTime: 5_000,
+      refetchInterval: 15_000,
+      retry: 0,
+      throwOnError: false,
+    })),
+  });
 
-  // Use individual worktreeStatus queries — their results are already cached
   const counts: Record<string, number> = {};
-  for (const wt of targets) {
-    const cached = qc.getQueryData<import('@sproutgit/types').StatusFileEntry[]>(
-      qk.worktreeStatus(wt.path),
-    );
-    counts[wt.path] = cached?.length ?? 0;
+  for (let i = 0; i < targets.length; i++) {
+    counts[targets[i]!.path] = results[i]?.data?.length ?? 0;
   }
   return counts;
 }
@@ -250,7 +262,7 @@ export function usePush(worktreePath: string) {
 export function useDeleteWorktree(gitRepoPath: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (args: { rootRepoPath: string; worktreePath: string; deleteBranch: boolean }) =>
+    mutationFn: (args: { rootRepoPath: string; worktreePath: string; deleteBranch: boolean; branchName?: string | null }) =>
       api.deleteWorktree(args) as Promise<void>,
     onSuccess: (_data, args) => {
       // Remove cached status for the deleted worktree so no in-flight refetch

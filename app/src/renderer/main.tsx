@@ -17,7 +17,7 @@ export const queryClient = new QueryClient({
       const msg = String(error);
       // Suppress transient errors from deleted worktrees — these self-heal
       // as queries get disabled once the path is removed from state.
-      if (msg.includes('does not exist') || msg.includes('no such file or directory')) return;
+      if (msg.includes('does not exist') || msg.includes('no such file or directory') || msg.includes('not a git repository')) return;
       globalToast(msg, 'error');
     },
   }),

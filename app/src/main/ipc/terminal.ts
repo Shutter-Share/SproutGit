@@ -3,19 +3,31 @@ import { IPC } from '@sproutgit/types';
 import { TerminalManagerWithMeta } from '@sproutgit/terminal';
 
 // Forward PTY output/exit events to the renderer window that created the session.
-const sessionWindows = new Map<string, BrowserWindow>();
+export const sessionWindows = new Map<string, BrowserWindow>();
 
-const manager = new TerminalManagerWithMeta(
+// Per-session exit callbacks registered by hook execution (hooks.ts).
+const hookExitHandlers = new Map<string, (exitCode: number) => void>();
+
+export function registerHookExitHandler(id: string, handler: (exitCode: number) => void): void {
+  hookExitHandlers.set(id, handler);
+}
+
+export const manager = new TerminalManagerWithMeta(
   (id, data) => {
     const win = sessionWindows.get(id);
     if (win && !win.isDestroyed()) {
       win.webContents.send(IPC.TERMINAL_DATA, { id, data });
     }
   },
-  (id) => {
+  (id, exitCode) => {
     const win = sessionWindows.get(id);
     if (win && !win.isDestroyed()) {
       win.webContents.send(IPC.TERMINAL_EXIT, { id });
+    }
+    const hookHandler = hookExitHandlers.get(id);
+    if (hookHandler) {
+      hookHandler(exitCode);
+      hookExitHandlers.delete(id);
     }
     sessionWindows.delete(id);
   },
@@ -30,7 +42,8 @@ export function registerTerminalHandlers(): void {
     rows?: number;
   }) => {
     const win = BrowserWindow.fromWebContents(_e.sender);
-    const shell = (args.shell ?? 'zsh') as import('@sproutgit/types').WorkspaceHookShell;
+    const defaultShell = process.platform === 'win32' ? 'powershell.exe' : 'zsh';
+    const shell = (args.shell ?? defaultShell) as import('@sproutgit/types').WorkspaceHookShell;
     let id: string;
     try {
       id = manager.spawn({

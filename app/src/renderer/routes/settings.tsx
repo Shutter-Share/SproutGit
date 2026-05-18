@@ -1,3 +1,4 @@
+import { Settings as SettingsIcon } from 'lucide-react';
 import { api } from '../api.js';
 import { createRoute, useNavigate } from '@tanstack/react-router';
 import { useState, useContext } from 'react';
@@ -52,7 +53,7 @@ function SettingsPage() {
           className="group flex items-center gap-1 rounded-md px-2 py-1 text-xs text-(--sg-text-dim) transition-colors hover:bg-(--sg-surface-raised) hover:text-(--sg-text)"
         >
           <span className="transition-transform group-hover:-translate-x-0.5">←</span>
-          <span>Projects</span>
+          <span>{workspacePath ? workspacePath.split(/[\\/]/).filter(Boolean).pop() : 'Projects'}</span>
         </button>
         <div className="h-3 w-px bg-(--sg-border)" />
         <span className="sg-heading text-xs font-medium text-(--sg-text)">Settings</span>
@@ -68,6 +69,9 @@ function SettingsPage() {
           {/* Page header */}
           <div className="relative flex items-center gap-3 rounded-lg bg-gradient-to-r from-(--sg-primary)/8 via-(--sg-primary)/4 to-transparent px-4 py-3">
             <span aria-hidden className="absolute top-3 bottom-3 left-0 w-[3px] rounded-r-full bg-(--sg-primary)" />
+            <div className="rounded-lg bg-(--sg-primary)/15 p-2 text-(--sg-primary) shrink-0">
+              <SettingsIcon size={18} />
+            </div>
             <div>
               <h1 className="sg-heading text-lg font-semibold text-(--sg-primary)">Settings</h1>
               <p className="text-[11px] text-(--sg-text-faint)">Configure SproutGit, integrations, and your default tools.</p>

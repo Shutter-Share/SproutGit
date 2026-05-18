@@ -453,8 +453,10 @@ export function CommitGraph({
                 </div>
                 {/* Commit subject */}
                 <span className="commit-row-subject" title={row.subject}>{row.subject}</span>
-                {/* Meta */}
-                <span className="commit-row-meta">{row.shortHash} · {row.authorName} · {formatDate(row.authorDate)}</span>
+                {/* Meta columns */}
+                <span className="commit-row-hash" title={row.hash}>{row.shortHash}</span>
+                <span className="commit-row-author" title={row.authorName}>{row.authorName}</span>
+                <span className="commit-row-date" title={formatFullDate(row.authorDate)}>{formatRelativeDate(row.authorDate)}</span>
               </div>
             );
           })}
@@ -502,9 +504,31 @@ export function CommitGraph({
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function formatDate(iso: string): string {
+function formatRelativeDate(iso: string): string {
   try {
-    return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(iso));
+    const date = new Date(iso);
+    const diff = Date.now() - date.getTime();
+    const mins = Math.floor(diff / 60_000);
+    const hours = Math.floor(diff / 3_600_000);
+    const days = Math.floor(diff / 86_400_000);
+    if (mins < 1)   return 'just now';
+    if (mins < 60)  return `${mins}m ago`;
+    if (hours < 24) return `${hours}h ago`;
+    if (days === 1) return 'yesterday';
+    if (days < 30)  return `${days}d ago`;
+    if (days < 365) return `${Math.floor(days / 30)}mo ago`;
+    return `${Math.floor(days / 365)}y ago`;
+  } catch {
+    return iso;
+  }
+}
+
+function formatFullDate(iso: string): string {
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      year: 'numeric', month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    }).format(new Date(iso));
   } catch {
     return iso;
   }

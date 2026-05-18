@@ -1,3 +1,4 @@
+import { Link2 } from 'lucide-react';
 import { api } from '../api.js';
 import { useState, useEffect } from 'react';
 import type { DeviceCodeResponse, GitHubAuthStatus } from '@sproutgit/types';
@@ -84,9 +85,7 @@ export function GitHubSection({ onToast, onAuthChange }: Props) {
   return (
     <section className="rounded-lg border border-(--sg-border) bg-(--sg-surface) p-5">
       <div className="mb-3 flex items-center gap-2">
-        <svg viewBox="0 0 16 16" aria-hidden className="h-4 w-4 text-(--sg-primary)" fill="currentColor">
-          <path d="M8 0C3.58 0 0 3.67 0 8.2c0 3.62 2.29 6.7 5.47 7.78.4.08.55-.18.55-.39 0-.2-.01-.85-.01-1.54-2.23.5-2.7-.98-2.7-.98-.36-.95-.9-1.2-.9-1.2-.73-.52.06-.51.06-.51.8.06 1.23.84 1.23.84.72 1.26 1.88.9 2.34.69.07-.54.28-.9.5-1.1-1.78-.21-3.64-.91-3.64-4.06 0-.9.31-1.63.82-2.2-.09-.21-.36-1.04.08-2.17 0 0 .67-.22 2.2.84A7.43 7.43 0 0 1 8 3.46c.68 0 1.37.1 2.01.31 1.53-1.06 2.2-.84 2.2-.84.44 1.13.17 1.96.08 2.17.51.57.82 1.3.82 2.2 0 3.16-1.87 3.84-3.66 4.05.29.26.54.77.54 1.56 0 1.13-.01 2.03-.01 2.31 0 .21.14.47.55.39A8.2 8.2 0 0 0 16 8.2C16 3.67 12.42 0 8 0Z" />
-        </svg>
+        <Link2 size={16} className="text-(--sg-primary) shrink-0" />
         <h2 className="sg-heading text-sm font-semibold text-(--sg-primary)">Git Provider</h2>
       </div>
 

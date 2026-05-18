@@ -88,7 +88,7 @@ export function ToastContainer({ toasts, onDismiss }: ContainerProps) {
   if (toasts.length === 0) return null;
   return (
     <div
-      className="fixed bottom-5 right-5 z-300 flex flex-col gap-2"
+      className="fixed bottom-5 left-5 z-300 flex flex-col gap-2"
       aria-label="Notifications"
       data-testid="toast-container"
     >

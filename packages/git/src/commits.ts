@@ -24,7 +24,7 @@ export async function getCommitGraph(
   const args = [
     'log',
     '--all',
-    '--topo-order',
+    '--date-order',
     `--format=${GRAPH_FORMAT}`,
     `--max-count=${limit}`,
     `--skip=${skip}`,

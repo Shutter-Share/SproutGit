@@ -387,7 +387,7 @@ function HomeView() {
 
         {/* Main */}
         <main className="flex-1 min-w-0 flex flex-col bg-(--sg-bg)">
-          <div className={sectionHeader}>
+          <div className={`${sectionHeader} bg-(--sg-surface)`}>
             <Clock size={11} strokeWidth={2.5} style={{ color: 'var(--sg-primary)' }} />
             <span>Recent projects</span>
           </div>

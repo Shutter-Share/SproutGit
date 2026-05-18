@@ -100,7 +100,7 @@ body {
   color: var(--sg-text);
   background: var(--sg-bg);
   font-family: var(--sg-font-body);
-  font-size: 13px;
+  font-size: 12px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -webkit-user-select: none;
@@ -249,7 +249,7 @@ code, pre, kbd, samp {
 .commit-row--selected { background: rgba(25, 172, 92, 0.12); }
 .commit-row--match { background: rgba(250, 180, 60, 0.12); }
 .commit-row--active-match { background: rgba(250, 180, 60, 0.28); }
-.commit-row-refs { display: flex; gap: 3px; flex-shrink: 0; }
+.commit-row-refs { display: flex; gap: 3px; flex-shrink: 1; min-width: 0; max-width: 180px; overflow: hidden; }
 .commit-ref {
   display: inline-flex; align-items: center; gap: 3px;
   padding: 1px 5px; border-radius: 4px; font-size: 10px; font-weight: 500;
@@ -260,7 +260,9 @@ code, pre, kbd, samp {
 .commit-ref--worktree { border-color: var(--sg-primary); color: var(--sg-primary); }
 .commit-ref--tag      { border-color: var(--sg-accent); color: var(--sg-accent); }
 .commit-row-subject { flex: 1; overflow: hidden; text-overflow: ellipsis; color: var(--sg-text); }
-.commit-row-meta { flex-shrink: 0; color: var(--sg-text-faint); font-size: 11px; }
+.commit-row-hash   { flex-shrink: 0; width: 70px; color: var(--sg-text-faint); font-size: 11px; font-family: var(--sg-font-code); }
+.commit-row-author { flex-shrink: 0; width: 120px; overflow: hidden; text-overflow: ellipsis; color: var(--sg-text-dim); font-size: 11px; }
+.commit-row-date   { flex-shrink: 0; width: 90px; text-align: right; color: var(--sg-text-faint); font-size: 11px; }
 .commit-graph-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--sg-text-faint); font-size: 12px; }
 .commit-graph-search { display: flex; align-items: center; gap: 4px; padding: 4px 8px; background: var(--sg-surface); border-bottom: 1px solid var(--sg-border); font-size: 12px; }
 .commit-graph-search input { flex: 1; background: none; border: none; outline: none; color: var(--sg-text); font-size: 12px; }

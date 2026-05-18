@@ -21,11 +21,22 @@ const TRIGGER_OPTIONS: { value: WorkspaceHookTrigger; label: string }[] = [
   { value: 'manual', label: 'Manual' },
 ];
 
-const DEFAULT_SCRIPT = `#!/usr/bin/env bash
-# Workspace: $SPROUTGIT_WORKSPACE
-# Worktree:  $SPROUTGIT_WORKTREE
-# Trigger:   $SPROUTGIT_TRIGGER
-`;
+function defaultScript(shell: WorkspaceHookShell): string {
+  if (shell === 'pwsh' || shell === 'powershell') {
+    return `# Workspace: $env:SPROUTGIT_WORKSPACE\n# Worktree:  $env:SPROUTGIT_WORKTREE\n# Trigger:   $env:SPROUTGIT_TRIGGER\n`;
+  }
+  return `#!/usr/bin/env ${shell === 'zsh' ? 'zsh' : 'bash'}\n# Workspace: $SPROUTGIT_WORKSPACE\n# Worktree:  $SPROUTGIT_WORKTREE\n# Trigger:   $SPROUTGIT_TRIGGER\n`;
+}
+
+function shellFromPath(path?: string): WorkspaceHookShell {
+  if (!path) return 'bash';
+  const lower = path.toLowerCase();
+  if (lower.includes('pwsh')) return 'pwsh';
+  if (lower.includes('powershell')) return 'powershell';
+  if (lower.includes('zsh')) return 'zsh';
+  if (lower.includes('bash')) return 'bash';
+  return 'bash';
+}
 
 const EXECUTION_TARGET_OPTIONS: Array<{ value: HookExecutionTarget; label: string }> = [
   { value: 'trigger_worktree', label: 'Trigger worktree' },
@@ -128,6 +139,7 @@ type Props = {
   workspacePath: string;
   api: HookApi;
   onClose: () => void;
+  defaultShell?: string;
 };
 
 type Draft = {
@@ -147,13 +159,13 @@ type Draft = {
   timeoutSeconds: number;
 };
 
-const defaultDraft = (): Draft => ({
+const defaultDraft = (shell: WorkspaceHookShell = 'bash'): Draft => ({
   name: '',
   scope: 'worktree',
   trigger: 'after_worktree_create',
-  shell: 'bash',
+  shell,
   executionTarget: 'trigger_worktree',
-  script: DEFAULT_SCRIPT,
+  script: defaultScript(shell),
   enabled: true,
   critical: false,
   switchOncePerSession: false,
@@ -195,12 +207,13 @@ function executionTargetLabel(target: HookExecutionTarget): string {
   return EXECUTION_TARGET_OPTIONS.find(option => option.value === target)?.label ?? target;
 }
 
-export function WorkspaceHooksModal({ open, workspacePath, api, onClose }: Props) {
+export function WorkspaceHooksModal({ open, workspacePath, api, onClose, defaultShell }: Props) {
   const [hooks, setHooks] = useState<WorkspaceHook[]>([]);
   const [loading, setLoading] = useState(false);
   const [editing, setEditing] = useState<{ hook: WorkspaceHook; draft: Draft } | null>(null);
   const [creating, setCreating] = useState<Draft | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -222,64 +235,117 @@ export function WorkspaceHooksModal({ open, workspacePath, api, onClose }: Props
 
   if (!open) return null;
 
-  async function save() {
-    setSaving(true);
+  /** Persists the current draft (create or edit) if the name is non-empty. */
+  async function saveDraftIfNeeded(): Promise<void> {
+    if (creating && creating.name.trim()) {
+      await api.createHook({
+        workspacePath,
+        id: self.crypto.randomUUID(),
+        name: creating.name,
+        scope: creating.scope,
+        trigger: creating.trigger,
+        shell: creating.shell,
+        executionTarget: creating.executionTarget,
+        script: creating.script,
+        enabled: creating.enabled,
+        critical: creating.critical,
+        switchOncePerSession: creating.switchOncePerSession,
+        switchRunOnCreate: creating.switchRunOnCreate,
+        switchRunOnDelete: creating.switchRunOnDelete,
+        keepOpenOnCompletion: creating.keepOpenOnCompletion,
+        timeoutSeconds: creating.timeoutSeconds,
+        dependencyIds: creating.dependencyIds,
+      });
+    } else if (editing && editing.draft.name.trim()) {
+      await api.updateHook({
+        workspacePath,
+        id: editing.hook.id,
+        name: editing.draft.name,
+        scope: editing.draft.scope,
+        trigger: editing.draft.trigger,
+        executionTarget: editing.draft.executionTarget,
+        shell: editing.draft.shell,
+        script: editing.draft.script,
+        enabled: editing.draft.enabled,
+        critical: editing.draft.critical,
+        switchOncePerSession: editing.draft.switchOncePerSession,
+        switchRunOnCreate: editing.draft.switchRunOnCreate,
+        switchRunOnDelete: editing.draft.switchRunOnDelete,
+        keepOpenOnCompletion: editing.draft.keepOpenOnCompletion,
+        timeoutSeconds: editing.draft.timeoutSeconds,
+        dependencyIds: editing.draft.dependencyIds,
+      });
+    }
+  }
+
+  /** Auto-saves the current draft, then closes the modal. */
+  async function handleClose() {
+    setSavingDraft(true);
+    setSaveError(null);
     try {
-      if (creating) {
-        await api.createHook({
-          workspacePath,
-          id: self.crypto.randomUUID(),
-          name: creating.name,
-          scope: creating.scope,
-          trigger: creating.trigger,
-          shell: creating.shell,
-          executionTarget: creating.executionTarget,
-          script: creating.script,
-          enabled: creating.enabled,
-          critical: creating.critical,
-          switchOncePerSession: creating.switchOncePerSession,
-          switchRunOnCreate: creating.switchRunOnCreate,
-          switchRunOnDelete: creating.switchRunOnDelete,
-          keepOpenOnCompletion: creating.keepOpenOnCompletion,
-          timeoutSeconds: creating.timeoutSeconds,
-          dependencyIds: creating.dependencyIds,
-        });
-        setCreating(null);
-      } else if (editing) {
-        await api.updateHook({
-          workspacePath,
-          id: editing.hook.id,
-          name: editing.draft.name,
-          scope: editing.draft.scope,
-          trigger: editing.draft.trigger,
-          executionTarget: editing.draft.executionTarget,
-          shell: editing.draft.shell,
-          script: editing.draft.script,
-          enabled: editing.draft.enabled,
-          critical: editing.draft.critical,
-          switchOncePerSession: editing.draft.switchOncePerSession,
-          switchRunOnCreate: editing.draft.switchRunOnCreate,
-          switchRunOnDelete: editing.draft.switchRunOnDelete,
-          keepOpenOnCompletion: editing.draft.keepOpenOnCompletion,
-          timeoutSeconds: editing.draft.timeoutSeconds,
-          dependencyIds: editing.draft.dependencyIds,
-        });
-        setEditing(null);
-      }
-      setHooks(await api.listHooks(workspacePath));
+      await saveDraftIfNeeded();
+      onClose();
+    } catch (err) {
+      setSaveError(String(err));
     } finally {
-      setSaving(false);
+      setSavingDraft(false);
+    }
+  }
+
+  /** Auto-saves the current draft, then switches to the given hook. */
+  async function selectHookItem(hook: WorkspaceHook) {
+    setSavingDraft(true);
+    setSaveError(null);
+    try {
+      await saveDraftIfNeeded();
+      const updated = await api.listHooks(workspacePath);
+      setHooks(updated);
+      setCreating(null);
+      const fresh = updated.find(h => h.id === hook.id) ?? hook;
+      setEditing({ hook: fresh, draft: draftFromHook(fresh) });
+    } catch (err) {
+      setSaveError(String(err));
+    } finally {
+      setSavingDraft(false);
+    }
+  }
+
+  /** Auto-saves the current draft, then opens the new-hook form. */
+  async function handleNewHook() {
+    setSavingDraft(true);
+    setSaveError(null);
+    try {
+      await saveDraftIfNeeded();
+      const updated = await api.listHooks(workspacePath).catch(() => hooks);
+      setHooks(updated);
+      setEditing(null);
+      setCreating(defaultDraft(shellFromPath(defaultShell)));
+    } catch (err) {
+      setSaveError(String(err));
+    } finally {
+      setSavingDraft(false);
     }
   }
 
   async function toggleHook(hook: WorkspaceHook) {
     await api.toggleHook(workspacePath, hook.id, !hook.enabled);
-    setHooks(await api.listHooks(workspacePath));
+    const updated = await api.listHooks(workspacePath);
+    setHooks(updated);
+    // Keep the editor draft in sync with the toggled state.
+    if (editing?.hook.id === hook.id) {
+      setEditing(e => e ? {
+        ...e,
+        hook: { ...e.hook, enabled: !hook.enabled },
+        draft: { ...e.draft, enabled: !hook.enabled },
+      } : null);
+    }
   }
 
   async function deleteHook(id: string) {
     await api.deleteHook(workspacePath, id);
-    setHooks(await api.listHooks(workspacePath));
+    const updated = await api.listHooks(workspacePath);
+    setHooks(updated);
+    if (editing?.hook.id === id) setEditing(null);
   }
 
   const activeDraft = creating ?? editing?.draft ?? null;
@@ -296,7 +362,6 @@ export function WorkspaceHooksModal({ open, workspacePath, api, onClose }: Props
     { value: 'powershell', label: 'powershell' },
   ];
 
-  const primaryBtn = 'inline-flex items-center gap-[5px] px-3 py-[5px] rounded-[6px] border-none cursor-pointer text-xs font-medium transition-colors whitespace-nowrap bg-(--sg-primary) text-white hover:bg-(--sg-primary-hover) disabled:opacity-50 disabled:cursor-not-allowed';
   const secondaryBtn = 'inline-flex items-center gap-[5px] px-3 py-[5px] rounded-[6px] cursor-pointer text-xs font-medium transition-colors whitespace-nowrap bg-transparent border border-(--sg-border) text-(--sg-text-dim) hover:bg-(--sg-surface-raised) disabled:opacity-50 disabled:cursor-not-allowed';
   const iconBtn = 'inline-flex items-center justify-center p-[3px] bg-transparent border-none cursor-pointer text-(--sg-text-faint) rounded-[4px] transition-colors hover:text-(--sg-text) hover:bg-(--sg-surface-raised)';
   const fieldLabel = 'text-[11px] font-semibold text-(--sg-text-dim) uppercase tracking-[0.04em]';
@@ -304,10 +369,10 @@ export function WorkspaceHooksModal({ open, workspacePath, api, onClose }: Props
   const sectionCard = 'rounded-lg border border-(--sg-border-subtle) bg-(--sg-surface-subtle) p-3 flex flex-col gap-2';
 
   return (
-    <div className="fixed inset-0 z-200 bg-black/45 flex items-center justify-center" onClick={onClose}>
+    <div className="fixed inset-0 z-200 bg-black/45 flex items-center justify-center" onClick={() => void handleClose()}>
       <div
         className="bg-(--sg-surface) border border-(--sg-border) rounded-xl shadow-[0_20px_60px_rgba(0,0,0,0.25)] flex flex-col overflow-hidden"
-        style={{ minWidth: 880, maxWidth: 1100, width: '92vw', maxHeight: '88vh' }}
+        style={{ minWidth: 560, maxWidth: 1100, width: '92vw', maxHeight: '88vh' }}
         onClick={e => e.stopPropagation()}
         role="dialog"
         aria-modal
@@ -324,14 +389,12 @@ export function WorkspaceHooksModal({ open, workspacePath, api, onClose }: Props
             <div className="flex items-center gap-2 shrink-0">
               <button
                 className={secondaryBtn}
-                onClick={() => {
-                  setEditing(null);
-                  setCreating(defaultDraft());
-                }}
+                disabled={savingDraft}
+                onClick={() => void handleNewHook()}
               >
                 <Plus size={12} /> New hook
               </button>
-              <button className={iconBtn} onClick={onClose}>
+              <button className={iconBtn} disabled={savingDraft} onClick={() => void handleClose()}>
                 <X size={14} />
               </button>
             </div>
@@ -339,7 +402,7 @@ export function WorkspaceHooksModal({ open, workspacePath, api, onClose }: Props
         </div>
 
         <div className="flex flex-1 overflow-hidden">
-          <div className="w-[340px] shrink-0 border-r border-(--sg-border) overflow-y-auto flex flex-col p-3 gap-3">
+          <div className="w-[260px] shrink-0 border-r border-(--sg-border) overflow-y-auto flex flex-col p-3 gap-3">
             {loading && <div className="p-3"><Spinner /></div>}
             {!loading && hooks.length === 0 && (
               <div className="rounded-lg border border-dashed border-(--sg-border) p-3">
@@ -359,10 +422,7 @@ export function WorkspaceHooksModal({ open, workspacePath, api, onClose }: Props
                     <div
                       key={hook.id}
                       className={`rounded-lg border px-3 py-2 cursor-pointer text-xs transition-colors ${editing?.hook.id === hook.id ? 'border-(--sg-primary) bg-[rgba(25,172,92,0.1)]' : 'border-(--sg-border-subtle) bg-(--sg-surface) hover:bg-(--sg-surface-raised)'}`}
-                      onClick={() => {
-                        setCreating(null);
-                        setEditing({ hook, draft: draftFromHook(hook) });
-                      }}
+                      onClick={() => void selectHookItem(hook)}
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0">
@@ -592,21 +652,17 @@ export function WorkspaceHooksModal({ open, workspacePath, api, onClose }: Props
                 </div>
               </div>
 
-              <div className="flex gap-2 justify-end pt-2 border-t border-(--sg-border-subtle) mt-auto">
-                <button
-                  className={secondaryBtn}
-                  onClick={() => { setCreating(null); setEditing(null); }}
-                >
-                  Cancel
-                </button>
-                <button
-                  className={primaryBtn}
-                  onClick={() => void save()}
-                  disabled={saving || !activeDraft.name.trim()}
-                >
-                  {saving ? <Spinner size="sm" /> : 'Save'}
-                </button>
-              </div>
+              {saveError && (
+                <div className="flex items-center justify-between gap-2 rounded-md border border-(--sg-danger)/30 bg-(--sg-danger)/10 px-3 py-2">
+                  <p className="text-[11px] text-(--sg-danger) m-0">{saveError}</p>
+                  <button className={iconBtn} onClick={() => setSaveError(null)}><X size={12} /></button>
+                </div>
+              )}
+              {!activeDraft.name.trim() && (
+                <p className="text-[11px] text-(--sg-text-faint) m-0 text-right">
+                  Add a name above to save this hook.
+                </p>
+              )}
             </div>
           )}
 

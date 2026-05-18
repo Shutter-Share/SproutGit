@@ -14,14 +14,12 @@ import {
   WindowControls,
   UpdateBadge,
 } from '@sproutgit/ui';
-import { GitBranch, Terminal, GitMerge, X, ChevronRight, Settings, Plus, Columns2, Rows3, LayoutGrid, Pencil, PanelTop, SquareSplitHorizontal, ChevronsRight, Trash2 } from 'lucide-react';
-import type { CommitEntry, DiffFileEntry, HookProgressEvent, WorktreeInfo } from '@sproutgit/types';
+import { GitBranch, Terminal, GitMerge, X, ChevronRight, ChevronDown, Settings, Plus, Columns2, Rows3, LayoutGrid, Pencil, PanelTop, SquareSplitHorizontal, ChevronsRight, Trash2 } from 'lucide-react';
+import type { CommitEntry, DiffFileEntry, WorktreeInfo } from '@sproutgit/types';
 import { useToast } from '../toast-context.js';
 import { useUpdateStore } from '../stores/update-store.js';
 import { useWorkspaceStore, resetWorkspaceStore } from '../stores/workspace-store.js';
-import type { HookStatus } from '../stores/workspace-store.js';
 import { WorktreeSidebar } from '../workspace/WorktreeSidebar.js';
-import { HookProgressOverlay } from '../workspace/HookProgressOverlay.js';
 import { CommitDiffPanel } from '../workspace/CommitDiffPanel.js';
 import { NewWorktreeDialog } from '../workspace/dialogs/NewWorktreeDialog.js';
 import { DeleteWorktreeDialog } from '../workspace/dialogs/DeleteWorktreeDialog.js';
@@ -39,6 +37,7 @@ import {
   usePull,
   usePush,
   useDeleteWorktree,
+  useWorktreeChangeCounts,
 } from '../queries.js';
 
 // ── Search params ─────────────────────────────────────────────────────────────
@@ -72,9 +71,22 @@ function WorkspaceInner() {
   const terminalSessions = useWorkspaceStore(s => s.terminalSessions);
   const activeTerminalId = useWorkspaceStore(s => s.activeTerminalId);
   const terminalLayout = useWorkspaceStore(s => s.terminalLayout);
+  const worktreeActiveTerminalId = useWorkspaceStore(s => s.worktreeActiveTerminalId);
   const creatingWorktree = useWorkspaceStore(s => s.creatingWorktree);
   const pendingCreationBranch = useWorkspaceStore(s => s.pendingCreationBranch);
   const { updateState, setUpdateState } = useUpdateStore();
+
+  // Sessions for the currently selected worktree. All other sessions keep
+  // their PTYs running in the background and reappear when you switch back.
+  const visibleSessions = terminalSessions.filter(s => s.cwd === activeWorktree?.path);
+
+  // ── Shell picker ──────────────────────────────────────────────────────
+  const [availableShells, setAvailableShells] = useState<{ name: string; path: string }[]>([]);
+  const [showShellPicker, setShowShellPicker] = useState(false);
+
+  useEffect(() => {
+    void api.listShells().then(setAvailableShells).catch(() => undefined);
+  }, []);
 
   // ── Server state via TanStack Query ──────────────────────────────────
   const { data: workspaceStatus } = useWorkspaceStatus(workspacePath);
@@ -98,21 +110,14 @@ function WorkspaceInner() {
   const { data: pushStatus } = usePushStatus(activeWorktree?.path);
 
   const loading = worktreesLoading || commitsLoading;
-  const terminalScopePath = activeWorktree?.path ?? workspacePath;
-  const scopedTerminalSessions = terminalSessions.filter(s => s.cwd === terminalScopePath);
-  const scopedActiveTerminalId = scopedTerminalSessions.some(s => s.id === activeTerminalId)
-    ? activeTerminalId
-    : (scopedTerminalSessions[scopedTerminalSessions.length - 1]?.id ?? null);
 
   // ── Worktree change counts (sidebar badges) ───────────────────────────
-  const worktreeChangeCounts: Record<string, number> = {};
   const rootP = workspaceStatus?.rootPath;
-  for (const wt of worktrees.filter(w => w.path !== rootP)) {
-    const cached = qc.getQueryData<{ files: unknown[] }>(qk.worktreeStatus(wt.path));
-    worktreeChangeCounts[wt.path] = cached?.files.length ?? 0;
-  }
+  const worktreeChangeCounts = useWorktreeChangeCounts(worktrees, rootP);
 
   // ── Pick initial active worktree once worktrees load ─────────────────
+  const [pendingNewWorktreePath, setPendingNewWorktreePath] = useState<string | null>(null);
+
   useEffect(() => {
     // Filter out root worktree — it should never be active
     const selectableWorktrees = worktrees.filter(w => w.path !== rootP);
@@ -127,6 +132,35 @@ function WorkspaceInner() {
     // If the workspace hasn't changed, preserve an already-valid selection
     // (e.g. a new worktree was added/removed — don't reset the active one).
     if (!workspaceChanged) {
+      // If a new worktree was just created, switch to it automatically.
+      if (pendingNewWorktreePath) {
+        const newWt = selectableWorktrees.find(w => w.path === pendingNewWorktreePath);
+        if (newWt) {
+          const prevPath = useWorkspaceStore.getState().activeWorktree?.path ?? null;
+          setPendingNewWorktreePath(null);
+          useWorkspaceStore.setState(s => ({
+            activeWorktree: newWt,
+            worktreeActiveTerminalId: {
+              ...s.worktreeActiveTerminalId,
+              ...(prevPath ? { [prevPath]: s.activeTerminalId } : {}),
+            },
+            activeTerminalId: s.worktreeActiveTerminalId[newWt.path] ?? null,
+          }));
+          void api.runSwitchHooks({
+            workspacePath,
+            targetWorktreePath: newWt.path,
+            initiatingWorktreePath: prevPath,
+            source: 'create',
+          }).then(() => api.runTriggerHooks({
+            workspacePath,
+            trigger: 'after_worktree_switch',
+            worktreePath: newWt.path,
+            initiatingWorktreePath: prevPath,
+            source: 'create',
+          })).catch(() => undefined);
+          return;
+        }
+      }
       const current = useWorkspaceStore.getState().activeWorktree;
       if (current && selectableWorktrees.some(w => w.path === current.path)) return;
     }
@@ -137,11 +171,39 @@ function WorkspaceInner() {
       const restored = saved ? (selectableWorktrees.find(w => w.path === saved) ?? null) : null;
       const initial = restored ?? selectableWorktrees.find(w => !w.detached) ?? selectableWorktrees[0] ?? null;
       useWorkspaceStore.setState({ activeWorktree: initial });
+      if (initial) {
+        void api.runSwitchHooks({
+          workspacePath,
+          targetWorktreePath: initial.path,
+          initiatingWorktreePath: null,
+          source: 'load',
+        }).then(() => api.runTriggerHooks({
+          workspacePath,
+          trigger: 'after_worktree_switch',
+          worktreePath: initial.path,
+          initiatingWorktreePath: null,
+          source: 'load',
+        })).catch(() => undefined);
+      }
     }).catch(() => {
       const initial = selectableWorktrees.find(w => !w.detached) ?? selectableWorktrees[0] ?? null;
       useWorkspaceStore.setState({ activeWorktree: initial });
+      if (initial) {
+        void api.runSwitchHooks({
+          workspacePath,
+          targetWorktreePath: initial.path,
+          initiatingWorktreePath: null,
+          source: 'load',
+        }).then(() => api.runTriggerHooks({
+          workspacePath,
+          trigger: 'after_worktree_switch',
+          worktreePath: initial.path,
+          initiatingWorktreePath: null,
+          source: 'load',
+        })).catch(() => undefined);
+      }
     });
-  }, [worktrees, rootP, workspacePath]);
+  }, [worktrees, rootP, workspacePath, pendingNewWorktreePath]);
 
   // ── Local UI state ────────────────────────────────────────────────────
   const [hooksModalOpen, setHooksModalOpen] = useState(false);
@@ -189,18 +251,17 @@ function WorkspaceInner() {
       .catch(() => undefined);
   }, [workspacePath]);
 
-  // ── Run switch hooks on initial load ─────────────────────────────────
+  // ── Close terminals when switching to a DIFFERENT workspace ──────────
+  // We use a ref so the cleanup only fires when the path genuinely changes
+  // (not when the component unmounts on navigation to the Projects screen).
+  const prevWorkspacePathRef = useRef<string>(workspacePath);
   useEffect(() => {
-    if (!workspaceStatus || worktrees.length === 0) return;
-    const initTarget = worktrees.find(w => !w.detached) ?? worktrees[0];
-    if (!initTarget) return;
-    void api.runSwitchHooks({
-      workspacePath,
-      targetWorktreePath: initTarget.path,
-      initiatingWorktreePath: null,
-    }).catch(() => undefined);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspacePath, workspaceStatus != null]);
+    const prevPath = prevWorkspacePathRef.current;
+    prevWorkspacePathRef.current = workspacePath;
+    if (prevPath && prevPath !== workspacePath) {
+      void api.closeTerminalsForPath(prevPath);
+    }
+  }, [workspacePath]);
 
   // ── File watcher → invalidate queries ────────────────────────────────
 
@@ -217,7 +278,6 @@ function WorkspaceInner() {
       void api.stopWatching(workspacePath);
       offWorktree();
       offRefs();
-      void api.closeTerminalsForPath(workspacePath);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspacePath, gitRepoPath]);
@@ -244,14 +304,18 @@ function WorkspaceInner() {
   }, [terminalLayout]);
 
   useEffect(() => {
-    if (activeTerminalId !== scopedActiveTerminalId) {
-      useWorkspaceStore.setState({ activeTerminalId: scopedActiveTerminalId });
+    // If the active terminal was closed (not in any session), fall back to
+    // the last visible session for the current worktree.
+    if (activeTerminalId && !terminalSessions.some(s => s.id === activeTerminalId)) {
+      const activePath = useWorkspaceStore.getState().activeWorktree?.path;
+      const last = terminalSessions.filter(s => s.cwd === activePath).at(-1)?.id ?? null;
+      useWorkspaceStore.setState({ activeTerminalId: last });
     }
-    if (renamingTerminalId && !scopedTerminalSessions.some(s => s.id === renamingTerminalId)) {
+    if (renamingTerminalId && !terminalSessions.some(s => s.id === renamingTerminalId)) {
       setRenamingTerminalId(null);
       setRenameValue('');
     }
-  }, [activeTerminalId, scopedActiveTerminalId, renamingTerminalId, scopedTerminalSessions]);
+  }, [activeTerminalId, renamingTerminalId, terminalSessions]);
 
   useEffect(() => {
     if (!renamingTerminalId || !renameInputRef.current) return;
@@ -275,10 +339,12 @@ function WorkspaceInner() {
     const offExit = api.onTerminalExit((id: string) => {
       useWorkspaceStore.setState(s => {
         const remaining = s.terminalSessions.filter(sess => sess.id !== id);
+        const currentPath = s.activeWorktree?.path;
+        const visibleRemaining = remaining.filter(sess => sess.cwd === currentPath);
         return {
           terminalSessions: remaining,
           activeTerminalId: s.activeTerminalId === id
-            ? (remaining[remaining.length - 1]?.id ?? null)
+            ? (visibleRemaining.at(-1)?.id ?? null)
             : s.activeTerminalId,
         };
       });
@@ -287,56 +353,31 @@ function WorkspaceInner() {
     return () => { offData(); offExit(); };
   }, []);
 
-  // ── Hook progress overlay ─────────────────────────────────────────────
+  // ── Hook terminal launch listener ─────────────────────────────────────
 
   useEffect(() => {
-    const offHookProgress = api.onHookProgress((event: HookProgressEvent) => {
-      if (event.phase === 'start') {
-        useWorkspaceStore.setState(s => ({
-          opTitle: s.opTitle ?? `Running ${event.trigger.replace(/_/g, ' ')} hooks…`,
-          opCompleted: false,
-          opHooks: [
-            ...s.opHooks.filter(h => h.hookId !== event.hookId),
-            { hookId: event.hookId, hookName: event.hookName, status: 'running' as HookStatus },
-          ],
-          opLogs: [...s.opLogs, `▶ ${event.hookName} (${event.trigger})`],
-        }));
-      } else if (event.phase === 'skipped') {
-        useWorkspaceStore.setState(s => ({
-          opHooks: s.opHooks.map(h => h.hookId === event.hookId ? { ...h, status: 'skipped' as HookStatus } : h),
-          opLogs: event.errorMessage?.trim()
-            ? [...s.opLogs, `⏭ ${event.hookName} skipped`, `  error: ${event.errorMessage}`]
-            : [...s.opLogs, `⏭ ${event.hookName} skipped`],
-        }));
-      } else {
-        const status = (event.status === 'success' ? 'success' : event.status === 'timed_out' ? 'timed_out' : 'error') as HookStatus;
-        useWorkspaceStore.setState(s => {
-          const logLines = [`${status === 'success' ? '✓' : '✗'} ${event.hookName} (${event.status})`];
-          if (event.stdoutSnippet?.trim()) logLines.push(`  stdout:\n${event.stdoutSnippet}`);
-          if (event.stderrSnippet?.trim()) logLines.push(`  stderr:\n${event.stderrSnippet}`);
-          if (event.errorMessage?.trim()) logLines.push(`  error: ${event.errorMessage}`);
-          const nextHooks = s.opHooks.map(h => h.hookId === event.hookId ? { ...h, status } : h);
-          const allDone = nextHooks.length > 0 && nextHooks.every(h => h.status !== 'running' && h.status !== 'pending');
-          const allOk = allDone && nextHooks.every(h => h.status === 'success' || h.status === 'skipped');
-          if (allDone) {
-            setTimeout(() => {
-              useWorkspaceStore.setState({ opCompleted: true });
-              const shouldKeepOpen = Boolean(event.keepOpenOnCompletion) || useWorkspaceStore.getState().activeTab === 'terminal';
-              if (allOk && !shouldKeepOpen) {
-                setTimeout(() => useWorkspaceStore.setState({ opTitle: null, opLogs: [], opHooks: [] }), 1500);
-              }
-            }, 0);
-          }
-          return { opHooks: nextHooks, opLogs: [...s.opLogs, ...logLines] };
-        });
-      }
+    const offHookTerminal = api.onHookTerminalLaunch((event) => {
+      const label = `hook: ${event.hookName}`;
+      useWorkspaceStore.setState(s => {
+        const cwd = event.cwd;
+        return {
+          terminalSessions: [...s.terminalSessions, {
+            id: event.terminalId,
+            cwd,
+            label: makeTerminalLabel(s.terminalSessions.filter(sess => sess.cwd === cwd), label),
+            pendingData: '',
+          }],
+          activeTerminalId: event.terminalId,
+          activeTab: 'terminal',
+          worktreeActiveTerminalId: {
+            ...s.worktreeActiveTerminalId,
+            [cwd]: event.terminalId,
+          },
+        };
+      });
     });
 
-    const offHookTerminal = api.onHookTerminalLaunch(() => {
-      useWorkspaceStore.setState({ activeTab: 'terminal' });
-    });
-
-    return () => { offHookProgress(); offHookTerminal(); };
+    return () => { offHookTerminal(); };
   }, []);
 
   // ── Auto-update listeners ─────────────────────────────────────────────
@@ -399,13 +440,36 @@ function WorkspaceInner() {
   async function handleWorktreeSwitch(wt: WorktreeInfo) {
     if (activeWorktree?.path === wt.path) return;
     const prevPath = activeWorktree?.path ?? null;
-    useWorkspaceStore.setState({ activeWorktree: wt });
+    // Save the active terminal for the outgoing worktree and restore the
+    // last known active terminal for the incoming worktree.
+    useWorkspaceStore.setState(s => {
+      const savedForTarget = s.worktreeActiveTerminalId[wt.path] ?? null;
+      const visibleForTarget = s.terminalSessions.filter(sess => sess.cwd === wt.path);
+      const restoredId = savedForTarget && visibleForTarget.some(sess => sess.id === savedForTarget)
+        ? savedForTarget
+        : (visibleForTarget.at(-1)?.id ?? null);
+      return {
+        activeWorktree: wt,
+        activeTerminalId: restoredId,
+        worktreeActiveTerminalId: {
+          ...s.worktreeActiveTerminalId,
+          ...(prevPath ? { [prevPath]: s.activeTerminalId } : {}),
+        },
+      };
+    });
     void api.setWorkspaceState(workspacePath, 'activeWorktreePath', wt.path).catch(() => undefined);
     void api.runSwitchHooks({
       workspacePath,
       targetWorktreePath: wt.path,
       initiatingWorktreePath: prevPath,
-    }).catch((err: unknown) => toast(`Switch hooks failed: ${String(err)}`, 'error'));
+      source: 'manual',
+    }).then(() => api.runTriggerHooks({
+      workspacePath,
+      trigger: 'after_worktree_switch',
+      worktreePath: wt.path,
+      initiatingWorktreePath: prevPath,
+      source: 'manual',
+    })).catch((err: unknown) => toast(`Switch hooks failed: ${String(err)}`, 'error'));
   }
 
   async function doDeleteWorktree(wt: WorktreeInfo) {
@@ -421,19 +485,50 @@ function WorkspaceInner() {
           workspacePath,
           targetWorktreePath: nextWt.path,
           initiatingWorktreePath: wt.path,
+          source: 'delete',
+        });
+        await api.runTriggerHooks({
+          workspacePath,
+          trigger: 'after_worktree_switch',
+          worktreePath: nextWt.path,
+          initiatingWorktreePath: wt.path,
+          source: 'delete',
         });
       } catch { /* non-critical */ }
     }
+
+    // before_worktree_remove: runs in the worktree being deleted
+    try {
+      await api.runTriggerHooks({
+        workspacePath,
+        trigger: 'before_worktree_remove',
+        worktreePath: wt.path,
+        initiatingWorktreePath: activeWorktree?.path ?? null,
+      });
+    } catch { /* non-critical */ }
 
     await api.closeTerminalsForPath(wt.path);
     // Switch the active worktree away *before* the mutation so that no git
     // queries fire on the deleted path while or after the deletion runs.
     if (isDeletingActive) useWorkspaceStore.setState({ activeWorktree: nextWt });
     await deleteWorktreeMutation.mutateAsync({
-      rootRepoPath: workspacePath,
+      rootRepoPath: gitRepoPath,
       worktreePath: wt.path,
-      deleteBranch: false,
+      // Delete the branch for managed worktrees (those living under .sproutgit/worktrees/)
+      deleteBranch: !!(workspaceStatus?.worktreesPath && wt.path.startsWith(workspaceStatus.worktreesPath) && wt.branch),
+      branchName: wt.branch ?? null,
     });
+
+    // after_worktree_remove: runs in the now-active worktree
+    if (nextWt ?? activeWorktree) {
+      void api.runTriggerHooks({
+        workspacePath,
+        trigger: 'after_worktree_remove',
+        worktreePath: (nextWt ?? activeWorktree)!.path,
+        initiatingWorktreePath: null,
+      }).catch(() => undefined);
+    }
+
     toast('Worktree removed', 'success');
     setDeleteTarget(null);
   }
@@ -496,7 +591,7 @@ function WorkspaceInner() {
     }
   }
 
-  async function openTerminal(cwd: string, label?: string) {
+  async function openTerminal(cwd: string, label?: string, shellOverride?: string) {
     try {
       const terminalArgs: {
         cwd: string;
@@ -504,21 +599,30 @@ function WorkspaceInner() {
         shell?: string;
       } = { cwd };
       if (label) terminalArgs.label = label;
-      if (defaultShell) terminalArgs.shell = defaultShell;
+      const resolvedShell = shellOverride ?? defaultShell;
+      if (resolvedShell) terminalArgs.shell = resolvedShell;
       const id = await api.createTerminal(terminalArgs);
+      const shellLabel = shellDisplayName(resolvedShell);
       useWorkspaceStore.setState(s => ({
         terminalSessions: [...s.terminalSessions, {
           id,
           cwd,
-          label: makeTerminalLabel(s.terminalSessions.filter(sess => sess.cwd === cwd), label ?? cwd.split('/').pop() ?? cwd),
+          label: makeTerminalLabel(s.terminalSessions.filter(sess => sess.cwd === cwd), label ?? shellLabel),
           pendingData: '',
         }],
         activeTerminalId: id,
         activeTab: 'terminal',
+        worktreeActiveTerminalId: { ...s.worktreeActiveTerminalId, [cwd]: id },
       }));
     } catch (err) {
       toast(`Failed to open terminal: ${String(err)}`, 'error');
     }
+  }
+
+  function shellDisplayName(shellPath: string | null | undefined): string {
+    if (!shellPath) return 'terminal';
+    const base = shellPath.split(/[/\\]/).pop() ?? shellPath;
+    return base.replace(/\.exe$/i, '');
   }
 
   function makeTerminalLabel(sessions: typeof terminalSessions, baseLabel: string) {
@@ -553,10 +657,12 @@ function WorkspaceInner() {
     await api.closeTerminal(id).catch(() => undefined);
     useWorkspaceStore.setState(s => {
       const remaining = s.terminalSessions.filter(sess => sess.id !== id);
+      const currentPath = s.activeWorktree?.path;
+      const visibleRemaining = remaining.filter(sess => sess.cwd === currentPath);
       return {
         terminalSessions: remaining,
         activeTerminalId: s.activeTerminalId === id
-          ? (remaining[remaining.length - 1]?.id ?? null)
+          ? (visibleRemaining.at(-1)?.id ?? null)
           : s.activeTerminalId,
       };
     });
@@ -572,10 +678,12 @@ function WorkspaceInner() {
     useWorkspaceStore.setState(s => {
       const idSet = new Set(ids);
       const remaining = s.terminalSessions.filter(sess => !idSet.has(sess.id));
+      const currentPath = s.activeWorktree?.path;
+      const visibleRemaining = remaining.filter(sess => sess.cwd === currentPath);
       return {
         terminalSessions: remaining,
         activeTerminalId: idSet.has(s.activeTerminalId ?? '')
-          ? (remaining[remaining.length - 1]?.id ?? null)
+          ? (visibleRemaining.at(-1)?.id ?? null)
           : s.activeTerminalId,
       };
     });
@@ -613,10 +721,10 @@ function WorkspaceInner() {
   }
 
   function openTerminalTabMenu(e: React.MouseEvent, sessionId: string) {
-    const index = scopedTerminalSessions.findIndex(s => s.id === sessionId);
+    const index = visibleSessions.findIndex(s => s.id === sessionId);
     if (index === -1) return;
-    const idsToRight = scopedTerminalSessions.slice(index + 1).map(s => s.id);
-    const otherIds = scopedTerminalSessions.filter(s => s.id !== sessionId).map(s => s.id);
+    const idsToRight = visibleSessions.slice(index + 1).map(s => s.id);
+    const otherIds = visibleSessions.filter(s => s.id !== sessionId).map(s => s.id);
     contextMenu.open(e, [
       {
         label: 'Rename',
@@ -627,7 +735,7 @@ function WorkspaceInner() {
         label: 'New Terminal',
         icon: <Plus size={14} />,
         onClick: () => {
-          void openTerminal(activeWorktree?.path ?? workspacePath, activeWorktree?.branch ?? undefined);
+          void openTerminal(activeWorktree?.path ?? workspacePath);
         },
       },
       'separator',
@@ -676,7 +784,7 @@ function WorkspaceInner() {
     return `sg-tab flex items-center gap-1.5 px-3 h-full text-xs cursor-pointer bg-transparent border-t-0 border-x-0 border-b-2 transition-colors whitespace-nowrap ${disabled
         ? 'text-(--sg-text-dim) border-transparent cursor-not-allowed opacity-50'
         : active
-          ? 'text-(--sg-text) border-(--sg-primary) font-medium cursor-pointer'
+          ? 'text-(--sg-primary) border-(--sg-primary) font-medium cursor-pointer'
           : 'text-(--sg-text-faint) border-transparent hover:text-(--sg-text) cursor-pointer'
       }`;
   }
@@ -717,8 +825,8 @@ function WorkspaceInner() {
           </div>
           <div className="flex items-center h-full pr-1 gap-0.5 shrink-0" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
             <UpdateBadge state={updateState} onInstall={() => void api.installUpdate()} />
-            <button className={iconBtn} title="Settings" onClick={() => void navigate({ to: '/settings', search: { workspace: workspacePath } })}>
-              <Settings size={15} />
+            <button className="inline-flex items-center justify-center p-2 bg-transparent border-none cursor-pointer text-(--sg-text-faint) rounded-sm transition-colors hover:text-(--sg-text) hover:bg-(--sg-surface-raised)" title="Settings" onClick={() => void navigate({ to: '/settings', search: { workspace: workspacePath } })}>
+              <Settings size={16} />
             </button>
           </div>
           <WindowControls side="right" />
@@ -779,20 +887,25 @@ function WorkspaceInner() {
                 disabled={!activeWorktree}
               >
                 <GitMerge size={12} /> Changes
+                {activeWorktree && (worktreeChangeCounts[activeWorktree.path] ?? 0) > 0 && (
+                  <span className="ml-1 rounded-full bg-(--sg-warning)/20 px-1.5 py-0 text-[9px] leading-4 font-semibold text-(--sg-warning)">
+                    {worktreeChangeCounts[activeWorktree.path]}
+                  </span>
+                )}
               </button>
               <button
                 className={tabCls(activeTab === 'terminal', !activeWorktree)}
                 onClick={() => {
                   if (!activeWorktree) return;
-                  if (scopedTerminalSessions.length === 0) {
-                    void openTerminal(activeWorktree.path, activeWorktree.branch ?? undefined);
+                  if (visibleSessions.length === 0) {
+                    void openTerminal(activeWorktree.path);
                   } else {
                     useWorkspaceStore.setState({ activeTab: 'terminal' });
                   }
                 }}
                 disabled={!activeWorktree}
               >
-                <Terminal size={12} /> Terminal{scopedTerminalSessions.length > 1 ? ` (${scopedTerminalSessions.length})` : ''}
+                <Terminal size={12} /> Terminal{visibleSessions.length > 1 ? ` (${visibleSessions.length})` : ''}
               </button>
             </div>
 
@@ -910,6 +1023,7 @@ function WorkspaceInner() {
                         void qc.invalidateQueries({ queryKey: qk.commits(gitRepoPath) });
                         void qc.invalidateQueries({ queryKey: qk.commitCount(gitRepoPath) });
                         void qc.invalidateQueries({ queryKey: qk.refs(gitRepoPath) });
+                        if (activeWorktree) void qc.invalidateQueries({ queryKey: qk.worktreeStatus(activeWorktree.path) });
                       }}
                       onClose={() => useWorkspaceStore.setState({ activeTab: 'graph' })}
                       onToast={(msg, v) => toast(msg, v)}
@@ -921,8 +1035,8 @@ function WorkspaceInner() {
                     <div className="flex flex-col h-full">
                       <div className="flex min-h-8 shrink-0 items-center gap-1 border-b border-(--sg-border) bg-(--sg-bg) px-1.5">
                         <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto py-0.5" role="tablist" aria-label="Terminal sessions">
-                          {scopedTerminalSessions.map(s => {
-                            const isActive = s.id === scopedActiveTerminalId;
+                          {visibleSessions.map(s => {
+                            const isActive = s.id === activeTerminalId;
                             const isRenaming = s.id === renamingTerminalId;
                             return (
                               <div
@@ -961,7 +1075,7 @@ function WorkspaceInner() {
                                   </button>
                                 )}
                                 <button
-                                  className="flex items-center px-1.5 text-(--sg-text-dim) transition-colors hover:text-(--sg-danger)"
+                                  className="flex items-center px-1.5 py-1.5 text-(--sg-text-dim) transition-colors hover:text-(--sg-danger)"
                                   title={`Close ${s.label}`}
                                   onClick={e => {
                                     e.stopPropagation();
@@ -978,11 +1092,39 @@ function WorkspaceInner() {
                           <button
                             data-testid="btn-add-terminal"
                             title="New terminal"
-                            className="flex items-center rounded px-2 py-1 text-(--sg-text-faint) transition-colors hover:bg-(--sg-surface-raised) hover:text-(--sg-text-dim)"
-                            onClick={() => void openTerminal(activeWorktree?.path ?? workspacePath, activeWorktree?.branch ?? undefined)}
+                            className="flex items-center rounded-l px-2 py-1 text-(--sg-text-faint) transition-colors hover:bg-(--sg-surface-raised) hover:text-(--sg-text-dim)"
+                            onClick={() => void openTerminal(activeWorktree?.path ?? workspacePath)}
                           >
                             <Plus size={13} />
                           </button>
+                          {availableShells.length > 0 && (
+                            <button
+                              title="Choose shell"
+                              className="flex items-center rounded-r px-1 py-1 text-(--sg-text-faint) transition-colors hover:bg-(--sg-surface-raised) hover:text-(--sg-text-dim)"
+                              onClick={() => setShowShellPicker(v => !v)}
+                            >
+                              <ChevronDown size={10} />
+                            </button>
+                          )}
+                          {showShellPicker && availableShells.length > 0 && (
+                            <>
+                              <div className="fixed inset-0 z-40" onClick={() => setShowShellPicker(false)} />
+                              <div className="absolute top-full right-0 z-50 mt-1 min-w-32.5 overflow-hidden rounded-md border border-(--sg-border) bg-(--sg-surface) py-1 shadow-xl">
+                                {availableShells.map(shell => (
+                                  <button
+                                    key={shell.path}
+                                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-(--sg-text) transition-colors hover:bg-(--sg-surface-raised)"
+                                    onClick={() => {
+                                      setShowShellPicker(false);
+                                      void openTerminal(activeWorktree?.path ?? workspacePath, undefined, shell.path);
+                                    }}
+                                  >
+                                    {shell.name}
+                                  </button>
+                                ))}
+                              </div>
+                            </>
+                          )}
                         </div>
                         <div className="mx-0.5 h-3.5 w-px bg-(--sg-border)" />
                         <div className="flex shrink-0 items-center gap-0.5 py-0.5">
@@ -1010,7 +1152,7 @@ function WorkspaceInner() {
                         </div>
                       </div>
                       <div className={terminalWrapperClass()}>
-                        {scopedTerminalSessions.map(s => (
+                        {visibleSessions.map(s => (
                           <div
                             key={s.id}
                             className={`h-full min-h-0 min-w-0 ${terminalLayout !== 'tabs' ? 'border-r border-(--sg-border) last:border-r-0 nth-[2n]:border-r-0 nth-[n+3]:border-t nth-[n+3]:border-(--sg-border)' : ''}`}
@@ -1040,6 +1182,7 @@ function WorkspaceInner() {
         open={hooksModalOpen}
         workspacePath={workspacePath}
         onClose={() => setHooksModalOpen(false)}
+        {...(defaultShell ? { defaultShell } : {})}
         api={{
           listHooks: p => api.listHooks(p),
           createHook: args => api.createHook(args),
@@ -1053,12 +1196,27 @@ function WorkspaceInner() {
       <NewWorktreeDialog
         open={showNewWorktree}
         workspacePath={workspacePath}
+        gitRepoPath={gitRepoPath}
         managedWorktreesPath={workspaceStatus?.worktreesPath ?? ''}
         refs={refs}
         onClose={() => setShowNewWorktree(false)}
-        onCreated={() => {
+        onBeforeCreate={async () => {
+          await api.runTriggerHooks({
+            workspacePath,
+            trigger: 'before_worktree_create',
+            worktreePath: activeWorktree?.path ?? workspacePath,
+            initiatingWorktreePath: activeWorktree?.path ?? null,
+          });
+        }}
+        onCreated={(newWorktreePath) => {
+          setPendingNewWorktreePath(newWorktreePath);
           void qc.invalidateQueries({ queryKey: qk.worktrees(gitRepoPath) });
           void qc.invalidateQueries({ queryKey: qk.refs(gitRepoPath) });
+          void api.runCreateHooks({
+            workspacePath,
+            newWorktreePath,
+            initiatingWorktreePath: activeWorktree?.path ?? null,
+          });
         }}
         onToast={(msg, v) => toast(msg, v)}
       />
@@ -1089,9 +1247,6 @@ function WorkspaceInner() {
         onConfirm={wt => void doDeleteWorktree(wt)}
         onCancel={() => setDeleteTarget(null)}
       />
-
-      {/* Hook progress overlay */}
-      <HookProgressOverlay />
     </>
   );
 }

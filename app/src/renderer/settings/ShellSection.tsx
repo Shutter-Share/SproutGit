@@ -1,3 +1,4 @@
+import { Terminal } from 'lucide-react';
 import { api } from '../api.js';
 import { useState, useEffect } from 'react';
 import { Spinner, type ToastData } from '@sproutgit/ui';
@@ -34,7 +35,9 @@ export function ShellSection({ onToast }: Props) {
 
   return (
     <section className="rounded-lg border border-(--sg-border) bg-(--sg-surface) p-5">
-      <h2 className="sg-heading mb-3 text-sm font-semibold text-(--sg-primary)">Default Shell</h2>
+      <h2 className="sg-heading mb-3 text-sm font-semibold text-(--sg-primary) flex items-center gap-1.5">
+        <Terminal size={15} /> Default Shell
+      </h2>
       {shellsLoading ? (
         <div className="flex items-center gap-2 text-xs text-(--sg-text-dim)">
           <Spinner size="sm" /> Detecting shells...
