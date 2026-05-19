@@ -5,8 +5,8 @@
  */
 import { ipcMain, type BrowserWindow } from 'electron';
 import { IPC } from '@sproutgit/types';
-import { watch, type FSWatcher } from 'fs';
-import { join, resolve } from 'path';
+import { watch, type FSWatcher } from 'node:fs';
+import { join, resolve } from 'node:path';
 
 const activeWatchers = new Map<string, FSWatcher[]>();
 

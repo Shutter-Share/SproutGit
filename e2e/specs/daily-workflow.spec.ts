@@ -171,12 +171,21 @@ describe('daily workflow', () => {
       });
 
       // Right-click the bugfix item to open the context menu.
-      const bugfixItem = $('[data-testid="worktree-item"][data-branch="bugfix/merged-fix"]');
-      await browser.action('pointer')
-        .move({ origin: bugfixItem })
-        .down({ button: 2 })
-        .up({ button: 2 })
-        .perform();
+      // CDP pointer actions don't reliably generate a contextmenu event in
+      // Electron on Windows, so dispatch it directly via JavaScript instead.
+      // Query the element inside execute() to avoid WebdriverIO serialisation issues.
+      await browser.execute((branch: string) => {
+        const el = document.querySelector(`[data-testid="worktree-item"][data-branch="${branch}"]`) as HTMLElement | null;
+        if (!el) throw new Error(`worktree-item[data-branch="${branch}"] not found`);
+        const rect = el.getBoundingClientRect();
+        el.dispatchEvent(new MouseEvent('contextmenu', {
+          bubbles: true,
+          cancelable: true,
+          button: 2,
+          clientX: rect.left + rect.width / 2,
+          clientY: rect.top + rect.height / 2,
+        }));
+      }, 'bugfix/merged-fix');
 
       // Click "Remove Worktree" in the context menu. Scope to the context-menu
       // portal element so the XPath doesn't match a high-level ancestor like

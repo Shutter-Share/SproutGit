@@ -93,7 +93,6 @@ function HomeView() {
       .then(v => setAppVersion(import.meta.env.DEV ? 'dev build' : `v${v}`))
       .catch(() => undefined);
 
-    // H1: Check if git is installed
     void api.gitInfo().then((info: GitInfo) => {
       if (!info.installed) setGitNotInstalled(true);
       setGitChecked(true);
@@ -108,7 +107,6 @@ function HomeView() {
       if (v) {
         setProjectsFolder(v);
       } else {
-        // H2: Default to ~/Projects if not set
         try {
           const home = await api.getHomeDir();
           const defaultFolder = `${home}/Projects`;
@@ -119,7 +117,6 @@ function HomeView() {
       }
     }).catch(() => undefined);
 
-    // H3: Load GitHub repos for clone autocomplete
     void api.githubAuthStatus().then(async (status: GitHubAuthStatus) => {
       if (status.authenticated) {
         try {
@@ -135,7 +132,6 @@ function HomeView() {
   useEffect(() => { if (showClone) setTimeout(() => cloneUrlRef.current?.focus(), 50); }, [showClone]);
   useEffect(() => { if (showImport) setTimeout(() => importPathRef.current?.focus(), 50); }, [showImport]);
 
-  // H8: Update badge listeners
   useEffect(() => {
     const offChecking = api.onUpdateChecking(() => setUpdateState({ status: 'checking' }));
     const offAvailable = api.onUpdateAvailable((version: string) => setUpdateState({ status: 'available', version }));
@@ -172,7 +168,6 @@ function HomeView() {
   async function openWorkspace(workspacePath: string, fromRecents = false) {
     setOpening(true);
     try {
-      // H11: Validate recent workspaces before navigating
       if (fromRecents) {
         const status = await api.inspectWorkspace(workspacePath);
         if (!status.isSproutgitProject) {
@@ -305,7 +300,6 @@ function HomeView() {
           <span className="text-xs text-(--sg-text-faint)">Checking git…</span>
         </div>
       )}
-      {/* H1: Git not installed error overlay */}
       {gitNotInstalled && (
         <div className="fixed inset-0 z-[500] bg-(--sg-bg) flex flex-col items-center justify-center gap-4 text-center px-8">
           <AlertTriangle size={40} className="text-yellow-500" />
@@ -329,7 +323,6 @@ function HomeView() {
         </span>
         <div className="flex items-center h-full pr-2 gap-1" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
-          {/* H8: UpdateBadge in titlebar */}
           <UpdateBadge state={updateState} onInstall={() => void api.installUpdate()} />
           <button className={iconBtn} title="Settings" onClick={() => void navigate({ to: '/settings' })}>
             <Settings size={15} />
@@ -340,7 +333,6 @@ function HomeView() {
 
       {/* Body */}
       <div className="flex flex-1 min-h-0">
-        {/* H9: Resizable sidebar */}
         <ResizableSidebar initialWidth={240} minWidth={180} maxWidth={400}>
           <aside className="flex flex-col h-full border-r border-(--sg-border) bg-(--sg-surface) overflow-y-auto">
             <div className={sectionHeader}>

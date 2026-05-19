@@ -85,7 +85,7 @@ function SettingsPage() {
 
             <div className="flex flex-col gap-6">
               <ShellSection onToast={toast} />
-              <AppSection onToast={toast} />
+              <AppSection />
             </div>
           </div>
         </div>

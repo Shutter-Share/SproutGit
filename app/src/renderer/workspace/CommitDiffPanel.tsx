@@ -28,8 +28,6 @@ hljs.registerLanguage('sql', sqlLang);
 hljs.registerLanguage('python', pythonLang);
 hljs.registerLanguage('go', goLang);
 
-export type { CommitEntry, DiffFileEntry };
-
 type Props = {
   commit: CommitEntry;
   files: DiffFileEntry[];

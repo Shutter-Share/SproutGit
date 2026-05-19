@@ -2,14 +2,10 @@ import { Info } from 'lucide-react';
 import { api } from '../api.js';
 import { useState, useEffect } from 'react';
 import type { GitInfo } from '@sproutgit/types';
-import { Spinner, type ToastData } from '@sproutgit/ui';
+import { Spinner } from '@sproutgit/ui';
 import { useUpdateStore } from '../stores/update-store.js';
 
-interface Props {
-  onToast: (msg: string, variant?: ToastData['variant']) => void;
-}
-
-export function AppSection({ onToast: _onToast }: Props) {
+export function AppSection() {
   const [gitInfo, setGitInfo] = useState<GitInfo | null>(null);
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [checkingForUpdates, setCheckingForUpdates] = useState(false);

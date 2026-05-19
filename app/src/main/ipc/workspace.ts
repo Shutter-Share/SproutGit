@@ -43,10 +43,10 @@ export function registerWorkspaceHandlers(configDb: ConfigDb): void {
     log.info('[workspace] addRecentWorkspace:', workspacePath);
     configDb
       .insert(recentWorkspaces)
-      .values({ workspacePath, lastOpenedAt: new Date(Date.now()) })
+      .values({ workspacePath, lastOpenedAt: new Date() })
       .onConflictDoUpdate({
         target: recentWorkspaces.workspacePath,
-        set: { lastOpenedAt: new Date(Date.now()) },
+        set: { lastOpenedAt: new Date() },
       })
       .run();
     // Also register with the OS so macOS Dock "Open Recent" and Windows
@@ -101,7 +101,7 @@ export function registerWorkspaceHandlers(configDb: ConfigDb): void {
     rootRepoPath?: string;
   }) => {
     const db = getWorkspaceDb(args.workspacePath);
-    const now = new Date(Date.now());
+    const now = new Date();
     db.insert(worktreeMetadata)
       .values({
         worktreePath: args.worktreePath,
@@ -155,7 +155,7 @@ export function registerWorkspaceHandlers(configDb: ConfigDb): void {
     dependencyIds?: string[];
   }) => {
     const db = getWorkspaceDb(args.workspacePath);
-    const now = new Date(Date.now());
+    const now = new Date();
     db.insert(hookDefinitions).values({
       id: args.id,
       name: args.name,
@@ -198,7 +198,7 @@ export function registerWorkspaceHandlers(configDb: ConfigDb): void {
     dependencyIds?: string[];
   }) => {
     const db = getWorkspaceDb(args.workspacePath);
-    const set: Record<string, unknown> = { updatedAt: new Date(Date.now()) };
+    const set: Record<string, unknown> = { updatedAt: new Date() };
     if (args.name !== undefined) set['name'] = args.name;
     if (args.scope !== undefined) set['scope'] = args.scope;
     if (args.trigger !== undefined) set['trigger'] = args.trigger;
@@ -252,7 +252,7 @@ export function registerWorkspaceHandlers(configDb: ConfigDb): void {
       stdoutSnippet: args.stdoutSnippet ?? null,
       stderrSnippet: args.stderrSnippet ?? null,
       errorMessage: args.errorMessage ?? null,
-      ranAt: new Date(Date.now()),
+      ranAt: new Date(),
     }).run();
   });
 
@@ -284,7 +284,7 @@ export function registerWorkspaceHandlers(configDb: ConfigDb): void {
     enabled: boolean;
   }) => {
     const db = getWorkspaceDb(args.workspacePath);
-    const now = new Date(Date.now());
+    const now = new Date();
     db.insert(nestedRepoSyncRules)
       .values({ repoRelativePath: args.repoRelativePath, enabled: args.enabled, createdAt: now, updatedAt: now })
       .onConflictDoUpdate({

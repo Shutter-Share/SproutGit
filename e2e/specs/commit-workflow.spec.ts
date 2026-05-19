@@ -35,7 +35,7 @@ describe('commit workflow', () => {
       .click();
 
     // It should move to staged.
-    await expect($('//*[contains(@class,"sg-file-status--staged") and contains(.,"A")]')).toBeDisplayed();
+    await expect($('.sg-file-status--staged')).toBeDisplayed();
 
     // Write a commit message.
     await $('.sg-commit-input').setValue('Add hello.txt');

@@ -15,7 +15,7 @@ import {
   UpdateBadge,
 } from '@sproutgit/ui';
 import { GitBranch, Terminal, GitMerge, X, ChevronRight, ChevronDown, Settings, Plus, Columns2, Rows3, LayoutGrid, Pencil, PanelTop, SquareSplitHorizontal, ChevronsRight, Trash2 } from 'lucide-react';
-import type { CommitEntry, DiffFileEntry, WorktreeInfo } from '@sproutgit/types';
+import type { CommitEntry, DiffFileEntry, WorktreeInfo, WorktreeSwitchHookSource } from '@sproutgit/types';
 import { useToast } from '../toast-context.js';
 import { useUpdateStore } from '../stores/update-store.js';
 import { useWorkspaceStore, resetWorkspaceStore } from '../stores/workspace-store.js';
@@ -43,6 +43,24 @@ import {
 // ── Search params ─────────────────────────────────────────────────────────────
 
 type WorkspaceSearch = { path: string };
+
+// ── Shared helpers ────────────────────────────────────────────────────────────
+
+async function runSwitchAndTriggerHooks(args: {
+  workspacePath: string;
+  targetWorktreePath: string;
+  initiatingWorktreePath: string | null;
+  source: WorktreeSwitchHookSource;
+}): Promise<void> {
+  await api.runSwitchHooks(args);
+  await api.runTriggerHooks({
+    workspacePath: args.workspacePath,
+    trigger: 'after_worktree_switch',
+    worktreePath: args.targetWorktreePath,
+    initiatingWorktreePath: args.initiatingWorktreePath,
+    source: args.source,
+  });
+}
 
 // ── Workspace view ────────────────────────────────────────────────────────────
 
@@ -146,18 +164,7 @@ function WorkspaceInner() {
             },
             activeTerminalId: s.worktreeActiveTerminalId[newWt.path] ?? null,
           }));
-          void api.runSwitchHooks({
-            workspacePath,
-            targetWorktreePath: newWt.path,
-            initiatingWorktreePath: prevPath,
-            source: 'create',
-          }).then(() => api.runTriggerHooks({
-            workspacePath,
-            trigger: 'after_worktree_switch',
-            worktreePath: newWt.path,
-            initiatingWorktreePath: prevPath,
-            source: 'create',
-          })).catch(() => undefined);
+          void runSwitchAndTriggerHooks({ workspacePath, targetWorktreePath: newWt.path, initiatingWorktreePath: prevPath, source: 'create' }).catch(() => undefined);
           return;
         }
       }
@@ -172,35 +179,13 @@ function WorkspaceInner() {
       const initial = restored ?? selectableWorktrees.find(w => !w.detached) ?? selectableWorktrees[0] ?? null;
       useWorkspaceStore.setState({ activeWorktree: initial });
       if (initial) {
-        void api.runSwitchHooks({
-          workspacePath,
-          targetWorktreePath: initial.path,
-          initiatingWorktreePath: null,
-          source: 'load',
-        }).then(() => api.runTriggerHooks({
-          workspacePath,
-          trigger: 'after_worktree_switch',
-          worktreePath: initial.path,
-          initiatingWorktreePath: null,
-          source: 'load',
-        })).catch(() => undefined);
+        void runSwitchAndTriggerHooks({ workspacePath, targetWorktreePath: initial.path, initiatingWorktreePath: null, source: 'load' }).catch(() => undefined);
       }
     }).catch(() => {
       const initial = selectableWorktrees.find(w => !w.detached) ?? selectableWorktrees[0] ?? null;
       useWorkspaceStore.setState({ activeWorktree: initial });
       if (initial) {
-        void api.runSwitchHooks({
-          workspacePath,
-          targetWorktreePath: initial.path,
-          initiatingWorktreePath: null,
-          source: 'load',
-        }).then(() => api.runTriggerHooks({
-          workspacePath,
-          trigger: 'after_worktree_switch',
-          worktreePath: initial.path,
-          initiatingWorktreePath: null,
-          source: 'load',
-        })).catch(() => undefined);
+        void runSwitchAndTriggerHooks({ workspacePath, targetWorktreePath: initial.path, initiatingWorktreePath: null, source: 'load' }).catch(() => undefined);
       }
     });
   }, [worktrees, rootP, workspacePath, pendingNewWorktreePath]);
@@ -458,18 +443,8 @@ function WorkspaceInner() {
       };
     });
     void api.setWorkspaceState(workspacePath, 'activeWorktreePath', wt.path).catch(() => undefined);
-    void api.runSwitchHooks({
-      workspacePath,
-      targetWorktreePath: wt.path,
-      initiatingWorktreePath: prevPath,
-      source: 'manual',
-    }).then(() => api.runTriggerHooks({
-      workspacePath,
-      trigger: 'after_worktree_switch',
-      worktreePath: wt.path,
-      initiatingWorktreePath: prevPath,
-      source: 'manual',
-    })).catch((err: unknown) => toast(`Switch hooks failed: ${String(err)}`, 'error'));
+    void runSwitchAndTriggerHooks({ workspacePath, targetWorktreePath: wt.path, initiatingWorktreePath: prevPath, source: 'manual' })
+      .catch((err: unknown) => toast(`Switch hooks failed: ${String(err)}`, 'error'));
   }
 
   async function doDeleteWorktree(wt: WorktreeInfo) {

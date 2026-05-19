@@ -2,9 +2,9 @@ import { ipcMain, app, shell, dialog, BrowserWindow } from 'electron';
 import { IPC } from '@sproutgit/types';
 import type { EditorInfo, GitToolInfo } from '@sproutgit/types';
 import { getGitConfig, setGitConfig } from '@sproutgit/git/config';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
-import { homedir } from 'os';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { homedir } from 'node:os';
 
 const exec = promisify(execFile);
 
