@@ -2,44 +2,65 @@
 import { getImage } from 'astro:assets';
 import type { ImageMetadata } from 'astro';
 
-import commitGraphLight  from '../assets/screenshots/workspace/commit-graph-light.png';
-import commitGraphDark   from '../assets/screenshots/workspace/commit-graph-dark.png';
-import changesPanelLight from '../assets/screenshots/diff/changes-panel-light.png';
-import changesPanelDark  from '../assets/screenshots/diff/changes-panel-dark.png';
-import contextMenuLight  from '../assets/screenshots/context-menu/commit-history-light.png';
-import contextMenuDark   from '../assets/screenshots/context-menu/commit-history-dark.png';
-import settingsLight     from '../assets/screenshots/settings/preferences-light.png';
-import settingsDark      from '../assets/screenshots/settings/preferences-dark.png';
-import hooksLight        from '../assets/screenshots/hooks/management-light.png';
-import hooksDark         from '../assets/screenshots/hooks/management-dark.png';
-import terminalLight     from '../assets/screenshots/terminal/grid-view-light.png';
-import terminalDark      from '../assets/screenshots/terminal/grid-view-dark.png';
+// Eagerly import every PNG under screenshots/ — keyed by relative path.
+// Structure: screenshots/{mac|windows|linux}/{category}/{name}-{light|dark}.png
+const allShots = import.meta.glob<{ default: ImageMetadata }>(
+  '../assets/screenshots/**/*.png',
+  { eager: true },
+);
 
-// Build optimised AVIF + WebP sources for a light/dark pair in parallel.
-async function optimise(l: ImageMetadata, d: ImageMetadata) {
-  const [la, lw, lp, da, dw, dp] = await Promise.all([
-    getImage({ src: l, format: 'avif' }),
-    getImage({ src: l, format: 'webp' }),
-    getImage({ src: l }),
-    getImage({ src: d, format: 'avif' }),
-    getImage({ src: d, format: 'webp' }),
-    getImage({ src: d }),
-  ]);
-  return { la, lw, lp, da, dw, dp };
+function getShot(platform: string, category: string, file: string): ImageMetadata | undefined {
+  return allShots[`../assets/screenshots/${platform}/${category}/${file}.png`]?.default;
 }
 
-const rawSlides = [
-  { id: 'commit-graph',  label: 'Commit graph',       caption: 'Lane-based history with worktree markers, ref badges, and right-click actions.', l: commitGraphLight,  d: commitGraphDark  },
-  { id: 'changes-panel', label: 'Changes & diff',      caption: 'Staged/unstaged files alongside a syntax-highlighted unified diff.',              l: changesPanelLight, d: changesPanelDark },
-  { id: 'context-menu',  label: 'Context menu',        caption: 'Right-click any commit to copy hashes, checkout, reset, or open a worktree.',    l: contextMenuLight,  d: contextMenuDark  },
-  { id: 'settings',      label: 'Settings',            caption: 'Git identity, editor, shell, merge tool, and GitHub auth — all in one place.',   l: settingsLight,     d: settingsDark     },
-  { id: 'hooks',         label: 'Workspace hooks',     caption: 'Lifecycle hooks with dependency ordering — run scripts when worktrees are created, switched, or deleted.', l: hooksLight, d: hooksDark },
-  { id: 'terminal',      label: 'Integrated terminal', caption: 'Multiple shell sessions per worktree in tabs, split, or grid layout.',            l: terminalLight,     d: terminalDark     },
-];
+// Build optimised AVIF + WebP + original src strings for a light/dark pair.
+async function optimisePair(light: ImageMetadata, dark: ImageMetadata) {
+  const [la, lw, lp, da, dw, dp] = await Promise.all([
+    getImage({ src: light, format: 'avif' }),
+    getImage({ src: light, format: 'webp' }),
+    getImage({ src: light }),
+    getImage({ src: dark,  format: 'avif' }),
+    getImage({ src: dark,  format: 'webp' }),
+    getImage({ src: dark }),
+  ]);
+  return { la: la.src, lw: lw.src, lp: lp.src, da: da.src, dw: dw.src, dp: dp.src };
+}
 
-// Run all 5 image pairs concurrently.
-const optimised = await Promise.all(rawSlides.map(s => optimise(s.l, s.d)));
-const slides = rawSlides.map((s, i) => ({ ...s, ...optimised[i] }));
+// Slide definitions — platform-agnostic.
+const SLIDE_DEFS = [
+  { id: 'commit-graph',  category: 'workspace',    base: 'commit-graph',   label: 'Commit graph',       caption: 'Lane-based history with worktree markers, ref badges, and right-click actions.' },
+  { id: 'changes-panel', category: 'diff',          base: 'changes-panel',  label: 'Changes & diff',     caption: 'Staged/unstaged files alongside a syntax-highlighted unified diff.'             },
+  { id: 'context-menu',  category: 'context-menu',  base: 'commit-history', label: 'Context menu',       caption: 'Right-click any commit to copy hashes, checkout, reset, or open a worktree.'  },
+  { id: 'settings',      category: 'settings',      base: 'preferences',    label: 'Settings',           caption: 'Git identity, editor, shell, merge tool, and GitHub auth — all in one place.'  },
+  { id: 'hooks',         category: 'hooks',         base: 'management',     label: 'Workspace hooks',    caption: 'Lifecycle hooks with dependency ordering — run scripts when worktrees are created, switched, or deleted.' },
+  { id: 'terminal',      category: 'terminal',      base: 'grid-view',      label: 'Integrated terminal',caption: 'Multiple shell sessions per worktree in tabs, split, or grid layout.'            },
+] as const;
+
+const PLATFORMS = ['mac', 'windows', 'linux'] as const;
+
+// Resolve and optimise all platform × slide combinations.
+const slides = await Promise.all(SLIDE_DEFS.map(async (def) => {
+  // mac is the required canonical source; other platforms fall back to mac.
+  const macLight = getShot('mac', def.category, `${def.base}-light`)!;
+  const macDark  = getShot('mac', def.category, `${def.base}-dark`)!;
+
+  const platformSrcs: Record<string, Awaited<ReturnType<typeof optimisePair>>> = {};
+  await Promise.all(PLATFORMS.map(async (p) => {
+    const light = getShot(p, def.category, `${def.base}-light`) ?? macLight;
+    const dark  = getShot(p, def.category, `${def.base}-dark`)  ?? macDark;
+    platformSrcs[p] = await optimisePair(light, dark);
+  }));
+
+  return {
+    ...def,
+    // SSR default: mac (most visitors; JS swaps for Windows/Linux)
+    mac: platformSrcs['mac']!,
+    // JSON blob stored as data attribute so client JS can swap sources
+    platforms: JSON.stringify(platformSrcs),
+    width:  macLight.width,
+    height: macLight.height,
+  };
+}));
 ---
 
 <section id="screenshots" class="sg-slider-section" aria-label="App screenshots">
@@ -79,21 +100,22 @@ const slides = rawSlides.map((s, i) => ({ ...s, ...optimised[i] }));
             data-index={i}
             data-active={i === 0 ? 'true' : 'false'}
             data-caption={slide.caption}
+            data-platforms={slide.platforms}
             aria-hidden={i !== 0}
             id={`slide-${slide.id}`}
             role="tabpanel"
           >
             <picture class="sg-slide-picture">
-              <source media="(prefers-color-scheme: dark)" type="image/avif" srcset={slide.da.src} />
-              <source media="(prefers-color-scheme: dark)" type="image/webp" srcset={slide.dw.src} />
-              <source media="(prefers-color-scheme: dark)"                   srcset={slide.dp.src} />
-              <source                                       type="image/avif" srcset={slide.la.src} />
-              <source                                       type="image/webp" srcset={slide.lw.src} />
+              <source media="(prefers-color-scheme: dark)" type="image/avif" srcset={slide.mac.da} />
+              <source media="(prefers-color-scheme: dark)" type="image/webp" srcset={slide.mac.dw} />
+              <source media="(prefers-color-scheme: dark)"                   srcset={slide.mac.dp} />
+              <source                                       type="image/avif" srcset={slide.mac.la} />
+              <source                                       type="image/webp" srcset={slide.mac.lw} />
               <img
-                src={slide.lp.src}
+                src={slide.mac.lp}
                 alt={slide.label}
-                width={commitGraphLight.width}
-                height={commitGraphLight.height}
+                width={slide.width}
+                height={slide.height}
                 loading={i === 0 ? 'eager' : 'lazy'}
                 decoding="async"
                 class="sg-slide-img"
@@ -312,6 +334,35 @@ const slides = rawSlides.map((s, i) => ({ ...s, ...optimised[i] }));
   }
   .sg-caption[data-fading] { opacity: 0; }
 </style>
+
+<script is:inline>
+  // Platform detection — swap <picture> sources to match the visitor's OS.
+  // Runs synchronously so image requests start with the correct URL.
+  // The SSR default is 'mac'; we only act when the platform differs.
+  (function () {
+    var ua = navigator.userAgent;
+    var platform = /Mac/.test(ua) && !/iPhone|iPad/.test(ua) ? 'mac'
+      : /Win/.test(ua) ? 'windows'
+      : 'linux';
+    if (platform === 'mac') return;
+    document.querySelectorAll('.sg-slide').forEach(function (slide) {
+      try {
+        var data = JSON.parse(slide.dataset.platforms || '{}');
+        var p = data[platform] || data['mac'];
+        if (!p) return;
+        // Source order must match the template: da, dw, dp, la, lw
+        var sources = slide.querySelectorAll('source');
+        if (sources[0]) sources[0].srcset = p.da;
+        if (sources[1]) sources[1].srcset = p.dw;
+        if (sources[2]) sources[2].srcset = p.dp;
+        if (sources[3]) sources[3].srcset = p.la;
+        if (sources[4]) sources[4].srcset = p.lw;
+        var img = slide.querySelector('img');
+        if (img) img.src = p.lp;
+      } catch (_) {}
+    });
+  })();
+</script>
 
 <script is:inline>
   (() => {

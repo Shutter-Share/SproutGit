@@ -59,8 +59,8 @@ representative at an online or offline event.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders responsible for enforcement at
-GitHub.
+reported by opening a private [GitHub Security Advisory](https://github.com/sproutgit/sproutgit/security/advisories/new)
+or by contacting the maintainers directly via a GitHub issue marked **[conduct]**.
 All complaints will be reviewed and investigated promptly and fairly.
 
 All community leaders are obligated to respect the privacy and security of the

@@ -1,0 +1,1 @@
+CREATE TABLE IF NOT EXISTS `__migration_0002_applied` (`ts` integer NOT NULL DEFAULT 0);

@@ -1,0 +1,120 @@
+{
+  "name": "@sproutgit/app",
+  "version": "0.0.1",
+  "private": true,
+  "homepage": "https://sproutgit.dev",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "dist": "electron-vite build && electron-builder",
+    "dist:mac": "electron-vite build && electron-builder --mac",
+    "dist:win": "electron-vite build && electron-builder --win",
+    "dist:linux": "electron-vite build && electron-builder --linux",
+    "preview": "electron-vite preview",
+    "typecheck": "tsgo --noEmit -p tsconfig.node.json && tsgo --noEmit -p tsconfig.web.json",
+    "start": "electron .",
+    "postinstall": "node node_modules/electron/install.js"
+  },
+  "build": {
+    "appId": "com.sproutgit.app",
+    "productName": "SproutGit",
+    "copyright": "Copyright © 2026 SproutGit contributors",
+    "directories": {
+      "buildResources": "build",
+      "output": "dist-electron"
+    },
+    "files": [
+      "out/**/*",
+      "!out/**/*.map",
+      "package.json"
+    ],
+    "extraMetadata": {
+      "main": "out/main/index.js"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "category": "public.app-category.developer-tools",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Development"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "InterestingSoftware",
+      "repo": "SproutGit"
+    }
+  },
+  "dependencies": {
+    "@fontsource/fira-code": "^5.2.7",
+    "@fontsource/plus-jakarta-sans": "^5.2.8",
+    "@fontsource/space-grotesk": "^5.2.10",
+    "@sproutgit/provider-github": "workspace:*",
+    "@sproutgit/database": "workspace:*",
+    "@sproutgit/git": "workspace:*",
+    "@sproutgit/terminal": "workspace:*",
+    "@sproutgit/types": "workspace:*",
+    "@sproutgit/ui": "workspace:*",
+    "@tanstack/react-query": "^5.100.10",
+    "@tanstack/react-router": "^1.169.2",
+    "electron-log": "^5.4.3",
+    "electron-updater": "^6.8.3",
+    "highlight.js": "^11.11.1",
+    "lucide-react": "^1.14.0",
+    "node-pty": "1.2.0-beta.12",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "zustand": "^5.0.13"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.4",
+    "@sproutgit/ts-config": "workspace:*",
+    "@tailwindcss/vite": "^4.3.0",
+    "@types/node": "^25.7.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "babel-plugin-react-compiler": "^1.0.0",
+    "electron": "^42.0.1",
+    "electron-builder": "^26.8.1",
+    "electron-vite": "^5.0.0",
+    "tailwindcss": "^4.3.0",
+    "typescript": "npm:@typescript/native-preview@beta",
+    "vite": "^8.0.12"
+  },
+  "license": "MIT"
+}

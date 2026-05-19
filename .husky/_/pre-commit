@@ -1,0 +1,2 @@
+#!/bin/sh
+node -e "require('child_process').execSync('pnpm lint && pnpm typecheck',{stdio:'inherit',shell:true})"

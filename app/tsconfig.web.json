@@ -1,0 +1,9 @@
+{
+  "extends": "@sproutgit/ts-config/react.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["vite/client"],
+    "allowArbitraryExtensions": true
+  },
+  "include": ["src/renderer"]
+}

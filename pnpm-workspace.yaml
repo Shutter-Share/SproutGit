@@ -1,0 +1,23 @@
+packages:
+  - app
+  - packages/*
+  - packages/providers/*
+  - e2e
+  - website
+allowBuilds:
+  better-sqlite3: true
+  edgedriver: false
+  electron-winstaller: true
+  esbuild: true
+  geckodriver: false
+  node-pty: true
+  protobufjs: true
+  sharp: true
+  simple-git-hooks: true
+onlyBuiltDependencies:
+  - better-sqlite3
+  - electron
+  - esbuild
+  - node-pty
+  - protobufjs
+  - simple-git-hooks

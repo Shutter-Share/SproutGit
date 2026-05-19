@@ -1,0 +1,275 @@
+import { initTelemetry, shutdownTelemetry, log } from './telemetry.js';
+initTelemetry(); // must be first — patches Node.js before other imports
+
+import { app, BrowserWindow, shell, nativeTheme, Menu } from 'electron';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import { registerGitHandlers } from './ipc/git.js';
+import { registerWorkspaceHandlers } from './ipc/workspace.js';
+import { registerWorkspaceInitHandlers } from './ipc/workspace-init.js';
+import { registerTerminalHandlers } from './ipc/terminal.js';
+import { registerSettingsHandlers } from './ipc/settings.js';
+import { registerSystemHandlers } from './ipc/system.js';
+import { registerGithubHandlers } from './ipc/github.js';
+import { registerHookHandlers } from './ipc/hooks.js';
+import { registerWatchHandlers } from './ipc/watcher.js';
+import { registerUpdateHandlers, startUpdateCheck } from './ipc/update.js';
+import { openConfigDb } from '@sproutgit/database';
+import { IPC } from '@sproutgit/types';
+
+export let configDb: ReturnType<typeof openConfigDb>;
+
+// Set the app name before the first window opens so the dock and menus show
+// "SproutGit" instead of "Electron" during development.
+app.setName('SproutGit');
+
+// In e2e test mode: use a per-PID directory for the config database so parallel
+// test instances don't share SQLite state.  We deliberately do NOT call
+// app.setPath('userData', ...) here because that overrides the --user-data-dir
+// flag injected by ChromeDriver/wdio-electron-service, which breaks DevTools
+// port detection and causes the entire WebDriver session to time out.
+//
+// Detection: check both the env var (set by the wdio runner process) and the
+// --sproutgit-e2e argv flag (passed via wdio appArgs, guaranteed to reach
+// Electron even if ChromeDriver sanitises the environment).
+const isE2EMode =
+  process.env['SPROUTGIT_E2E'] === '1' || process.argv.includes('--sproutgit-e2e');
+const e2eDataPath = isE2EMode ? join(tmpdir(), `sg-e2e-data-${process.pid}`) : null;
+
+// In e2e mode, redirect electron-log to a predictable path so the WDIO runner
+// can read and surface it on test failures. This must happen before any log call.
+if (isE2EMode) {
+  log.transports.file.resolvePathFn = () => join(tmpdir(), 'sg-e2e-latest.log');
+  log.info('[e2e] E2E mode active. pid:', process.pid);
+  log.info('[e2e] argv:', process.argv.join(' '));
+}
+
+// Allow Electron MCP tools to attach in development without requiring
+// per-command launch flags.
+if (process.env['NODE_ENV'] === 'development') {
+  app.commandLine.appendSwitch('remote-debugging-port', '9222');
+}
+
+let mainWindow: BrowserWindow | null = null;
+function getMainWindow(): BrowserWindow | null { return mainWindow; }
+
+// ── macOS application menu ────────────────────────────────────────────────────
+// Without an explicit menu, Cmd+C / Cmd+V / Cmd+Z etc. don't work on macOS.
+
+function buildMenu(): void {
+  const template: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: app.name,
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'pasteAndMatchStyle' },
+        { role: 'delete' },
+        { role: 'selectAll' },
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        ...(process.env['NODE_ENV'] === 'development'
+          ? [{ role: 'toggleDevTools' as const }]
+          : []),
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'zoom' },
+        { type: 'separator' },
+        { role: 'front' },
+        { role: 'window' },
+      ],
+    },
+  ];
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+function createWindow(): BrowserWindow {
+  const win = new BrowserWindow({
+    width: 960,
+    height: 620,
+    minWidth: 800,
+    minHeight: 500,
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
+    // Centre the traffic-light buttons vertically in our 38 px titlebar.
+    ...(process.platform === 'darwin' && { trafficLightPosition: { x: 16, y: 12 } }),
+    frame: process.platform !== 'darwin',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#1e1e2e' : '#f5f5f5',
+    // Override the default Electron icon on Windows/Linux with the SproutGit logo.
+    // On macOS the dock icon is set separately via app.dock.setIcon() after ready.
+    ...(process.platform !== 'darwin' && { icon: join(__dirname, '../../build/icon.png') }),
+    show: false,
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      sandbox: false,
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  win.once('ready-to-show', () => {
+    win.show();
+  });
+
+  // Notify the renderer when the window maximize state changes so the
+  // WindowControls component can update its icon.
+  win.on('maximize', () => win.webContents.send('event:windowMaximized'));
+  win.on('unmaximize', () => win.webContents.send('event:windowUnmaximized'));
+
+  // Electron fires these on native full-screen (green button / Cmd+Ctrl+F).
+  // The renderer adjusts --sg-titlebar-inset via the window-fullscreen class.
+  win.on('enter-full-screen', () => win.webContents.send('event:windowEnterFullscreen'));
+  win.on('leave-full-screen', () => win.webContents.send('event:windowLeaveFullscreen'));
+
+  // Open external links in the system browser, not in the app.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    void shell.openExternal(url);
+    return { action: 'deny' };
+  });
+
+  // Forward renderer console output to electron-log (captured on disk).
+  const levels = ['verbose', 'info', 'warn', 'error'] as const;
+  win.webContents.on('console-message', (_e, level, message) => {
+    log[levels[level] ?? 'info']('[renderer]', message);
+  });
+
+  if (process.env['NODE_ENV'] === 'development' && process.env['ELECTRON_RENDERER_URL']) {
+    void win.loadURL(process.env['ELECTRON_RENDERER_URL']);
+  } else {
+    void win.loadFile(join(__dirname, '../renderer/index.html'));
+  }
+
+  return win;
+}
+
+// Queue paths received via open-file before the window is ready.
+const pendingOpenPaths: string[] = [];
+
+// macOS: opened via Dock "Open Recent" or by the OS passing a file/folder.
+app.on('open-file', (event, filePath) => {
+  event.preventDefault();
+  if (mainWindow?.webContents) {
+    mainWindow.webContents.send(IPC.EVENT_OPEN_WORKSPACE, filePath);
+  } else {
+    pendingOpenPaths.push(filePath);
+  }
+});
+
+app.whenReady().then(() => {
+  if (isE2EMode) log.info('[e2e] whenReady fired');
+
+  const userDataPath = e2eDataPath ?? app.getPath('userData');
+  const dbPath = join(userDataPath, 'config.db');
+  if (isE2EMode) log.info('[e2e] opening config db at', dbPath);
+  configDb = openConfigDb(dbPath);
+  if (isE2EMode) log.info('[e2e] config db opened');
+
+  // app.dock is only available after ready. In dev, Electron runs as its own
+  // binary so we override the icon; in production it's embedded in the bundle.
+  if (process.platform === 'darwin' && app.dock) {
+    // Use PNG — nativeImage.createFromPath can silently return empty for .icns.
+    // Passing the path string directly is the most reliable approach.
+    app.dock.setIcon(join(__dirname, '../../build/icon.png'));
+  }
+
+  // macOS: set the application menu so Cmd+C/V/Z/X work in text inputs.
+  // Windows/Linux: suppress the menu bar entirely (native bar is hidden, and
+  // Ctrl+C/V/Z are handled by the OS without a menu).
+  // Skip in E2E mode — on Linux, GTK menu init can hang with no real desktop.
+  if (process.platform === 'darwin' && !isE2EMode) {
+    buildMenu();
+  } else {
+    Menu.setApplicationMenu(null);
+  }
+  if (isE2EMode) log.info('[e2e] skipped buildMenu, registering handlers');
+
+  registerGitHandlers();
+  if (isE2EMode) log.info('[e2e] git handlers ok');
+  registerWorkspaceHandlers(configDb);
+  if (isE2EMode) log.info('[e2e] workspace handlers ok');
+  registerWorkspaceInitHandlers();
+  if (isE2EMode) log.info('[e2e] workspace-init handlers ok');
+  registerTerminalHandlers();
+  if (isE2EMode) log.info('[e2e] terminal handlers ok');
+  registerSettingsHandlers(configDb);
+  if (isE2EMode) log.info('[e2e] settings handlers ok');
+  registerSystemHandlers();
+  if (isE2EMode) log.info('[e2e] system handlers ok');
+  registerGithubHandlers(userDataPath);
+  if (isE2EMode) log.info('[e2e] github handlers ok');
+  registerHookHandlers(getMainWindow);
+  if (isE2EMode) log.info('[e2e] hook handlers ok');
+  registerWatchHandlers(getMainWindow);
+  if (isE2EMode) log.info('[e2e] watch handlers ok');
+  // Skip update handler registration in E2E mode. On Linux CI, electron-updater
+  // initialises AppImageUpdater which accesses D-Bus / libsecret and hangs for
+  // ~20 s when no real session bus is available. Auto-update is irrelevant in tests.
+  if (!isE2EMode) {
+    registerUpdateHandlers();
+  }
+  if (isE2EMode) log.info('[e2e] handlers registered');
+
+  mainWindow = createWindow();
+  if (isE2EMode) log.info('[e2e] window created');
+
+  mainWindow.once('ready-to-show', () => {
+    // Skip update check in E2E mode — on Linux, autoUpdater.checkForUpdates()
+    // initialises AppImageUpdater which accesses D-Bus and hangs in CI.
+    if (!isE2EMode) {
+      startUpdateCheck();
+    }
+    // Flush any paths that arrived before the window was ready.
+    for (const p of pendingOpenPaths) {
+      mainWindow?.webContents.send(IPC.EVENT_OPEN_WORKSPACE, p);
+    }
+    pendingOpenPaths.length = 0;
+  });
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      mainWindow = createWindow();
+    }
+  });
+});
+
+app.on('window-all-closed', () => {
+  // Always quit in e2e test mode so the test runner can clean up properly.
+  if (process.platform !== 'darwin' || isE2EMode) app.quit();
+});
+
+app.on('before-quit', () => {
+  void shutdownTelemetry();
+});

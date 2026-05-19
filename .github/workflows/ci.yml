@@ -1,658 +1,267 @@
 name: CI
-run-name: >-
-  CI ·
-  ${{ github.event_name == 'pull_request' && format('PR #{0}', github.event.pull_request.number) || github.ref_name }}
-  · v0.1.${{ github.run_number }}
 
 on:
   push:
-    branches: [main]
+    branches: [main, electron]
+    tags: ['v*']
   pull_request:
-    branches: [main]
+    branches: [main, electron]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-
-env:
-  BASE_VERSION: '0.1'
+# Deny all permissions by default; each job grants only what it needs.
+# This limits blast radius if a step is compromised (supply chain attack).
+permissions: {}
 
 jobs:
-  docs-lint:
-    name: '00 · Docs · Drift Lint'
+  # ── Lint & typecheck (fast, ubuntu-only) ──────────────────────────────────
+  lint:
+    name: Lint & Typecheck
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v6
-
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: 20
-
-      - name: Run documentation drift checks
-        run: node scripts/check-doc-drift.mjs
-
-  check-frontend:
-    name: '01 · Frontend · Check + Build'
-    needs: docs-lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 9
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
-
       - run: pnpm install --frozen-lockfile
-        env:
-          SPROUTGIT_SKIP_PLAYWRIGHT_SETUP: '1'
-      - run: pnpm run check
-      - run: pnpm run build
+      - uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: turbo-lint-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
+          restore-keys: |
+            turbo-lint-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-
+            turbo-lint-${{ runner.os }}-
+      - run: pnpm typecheck
+      - run: pnpm lint
 
-  check-rust:
-    name: '02 · Rust · Validate (${{ matrix.os }})'
-    needs: docs-lint
-    runs-on: ${{ matrix.os }}
+  # ── Unit / Vite tests (all 3 platforms) ───────────────────────────────────
+  test:
+    name: Unit Tests (${{ matrix.os }})
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
-      # Linux: install Tauri system deps
-      - name: Install system dependencies (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-
-      - name: Cargo check
-        working-directory: src-tauri
-        run: cargo check
-
-      - name: Cargo test
-        if: runner.os == 'Linux'
-        working-directory: src-tauri
-        run: cargo test --all-targets --verbose
-
-      - name: Cargo clippy
-        if: runner.os == 'Linux'
-        working-directory: src-tauri
-        run: cargo clippy -- -D warnings
-
-  e2e-generated:
-    name: '03 · E2E · Generated (${{ matrix.os }})'
-    needs: [check-frontend, check-rust]
+        os: [ubuntu-latest, macos-14, windows-latest]
     runs-on: ${{ matrix.os }}
-    permissions:
-      contents: read
-      checks: write
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v6
-
-      - uses: pnpm/action-setup@v6
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
         with:
-          version: 9
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/cache@v4
         with:
-          workspaces: src-tauri
+          path: .turbo
+          key: turbo-test-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
+          restore-keys: |
+            turbo-test-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-
+            turbo-test-${{ runner.os }}-
+      - run: pnpm test --filter=!@sproutgit/e2e
 
-      - name: Install system dependencies (Linux)
+  # ── Build packages + app (all 3 platforms) ────────────────────────────────
+  build:
+    name: Build (${{ matrix.platform }})
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+    needs: [lint, test]
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: mac
+          - os: windows-latest
+            platform: win
+          - os: ubuntu-latest
+            platform: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      # runner.temp is only available within steps, not job-level env.
+      - name: Set Electron cache paths
+        shell: bash
+        run: |
+          echo "ELECTRON_CACHE=${{ runner.temp }}/electron-cache" >> "$GITHUB_ENV"
+          echo "ELECTRON_BUILDER_CACHE=${{ runner.temp }}/electron-builder-cache" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: turbo-build-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
+          restore-keys: |
+            turbo-build-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}-
+            turbo-build-${{ runner.os }}-
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/electron-cache
+            ${{ runner.temp }}/electron-builder-cache
+          key: electron-${{ runner.os }}-${{ hashFiles('app/package.json') }}
+      - run: pnpm build --filter=!@sproutgit/app --filter=!sproutgit-website
+      - name: Package app
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        working-directory: app
+        # Run vite build then electron-builder separately so we can pass
+        # --publish never. This prevents electron-builder from trying to
+        # upload to GitHub Releases (the release job does that), and ensures
+        # GH_TOKEN is never needed in the build matrix — narrowing the
+        # attack surface if a dependency is compromised.
+        run: |
+          pnpm exec electron-vite build
+          pnpm exec electron-builder --${{ matrix.platform }} --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SproutGit-${{ matrix.platform }}
+          path: |
+            app/dist-electron/*.dmg
+            app/dist-electron/*.zip
+            app/dist-electron/*.exe
+            app/dist-electron/*.AppImage
+            app/dist-electron/*.deb
+            app/dist-electron/latest*.yml
+          if-no-files-found: ignore
+
+  # ── E2E tests (all 3 platforms) ───────────────────────────────────────────
+  e2e:
+    name: E2E Tests (${{ matrix.platform }})
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+    needs: [lint, test]
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            platform: mac
+          - os: windows-latest
+            platform: win
+          - os: ubuntu-latest
+            platform: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      # runner.temp is only available within steps, not job-level env.
+      - name: Set Electron cache path
+        shell: bash
+        run: echo "ELECTRON_CACHE=${{ runner.temp }}/electron-cache" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      # Restore Electron binary cache BEFORE pnpm install so the postinstall
+      # script can use the cached zip instead of downloading from the network.
+      # If placed after install, the cache is restored too late to help.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/electron-cache
+          key: electron-${{ runner.os }}-${{ hashFiles('app/package.json') }}
+      - run: pnpm install --frozen-lockfile
+      - name: Install Electron system dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xvfb sqlite3
-
-      - name: Install sqlite3 (macOS)
-        if: runner.os == 'macOS'
-        run: brew install sqlite
-
-      - name: Install sqlite3 (Windows)
-        if: runner.os == 'Windows'
+          sudo apt-get update -q
+          sudo apt-get install -y -q \
+            xvfb \
+            libgbm1 libnss3 libatk1.0-0 libatk-bridge2.0-0 \
+            libdrm2 libxkbcommon0 libxdamage1 libxrandr2 libxfixes3 \
+            libxcomposite1 libxcursor1 libxi6 libxss1 libxtst6 \
+            libasound2t64 libpango-1.0-0 libpangocairo-1.0-0 \
+            libdbus-1-3 libglib2.0-0
+      # Build all packages, then the renderer (no electron-builder packaging needed)
+      - run: pnpm build --filter=!@sproutgit/app --filter=!sproutgit-website
+      - name: Build renderer
+        working-directory: app
+        run: pnpm exec electron-vite build
+      # Linux needs a virtual display for Electron
+      - name: Run E2E tests (Linux)
+        if: matrix.platform == 'linux'
+        run: xvfb-run --auto-servernum --server-args="-screen 0 1280x800x24" pnpm --filter @sproutgit/e2e test
+      - name: Run E2E tests (macOS / Windows)
+        if: matrix.platform != 'linux'
+        run: pnpm --filter @sproutgit/e2e test
+      # ── Diagnostics on failure ───────────────────────────────────────────
+      - name: Dump E2E diagnostics (Linux/macOS)
+        if: failure() && runner.os != 'Windows'
+        run: |
+          echo "=== Chromium internal log (--log-file) ==="
+          cat "$(node -e "const{tmpdir}=require('os');process.stdout.write(tmpdir())")/electron-e2e-chromium.log" 2>/dev/null | tail -n 200 || echo "(not found)"
+          echo ""
+          echo "=== electron-log main.log ==="
+          if [ "$(uname)" = "Darwin" ]; then
+            cat "${HOME}/Library/Logs/SproutGit/main.log" 2>/dev/null | tail -n 200 || echo "(not found)"
+          else
+            cat "${HOME}/.config/SproutGit/logs/main.log" 2>/dev/null | tail -n 200 || echo "(not found)"
+            echo ""
+            echo "=== Electron binary / ldd ==="
+            ELECTRON_BIN=$(node -e "process.stdout.write(require('electron'))" 2>/dev/null) || true
+            ldd "${ELECTRON_BIN}" 2>/dev/null | grep "not found" || echo "(no missing libs)"
+            echo "DISPLAY=${DISPLAY}"
+          fi
+          echo ""
+          echo "=== sg-e2e-latest.log ==="
+          cat "$(node -e "const{tmpdir}=require('os');process.stdout.write(tmpdir())")/sg-e2e-latest.log" 2>/dev/null || echo "(not found)"
+        working-directory: e2e
+      - name: Dump E2E diagnostics (Windows)
+        if: failure() && runner.os == 'Windows'
         shell: pwsh
         run: |
-          # Use sqlite3 already on the runner if available; only fall back to
-          # Chocolatey when it is genuinely missing. This avoids hard failures
-          # caused by transient Chocolatey community-feed outages (503s).
-          $sqlite = Get-Command sqlite3 -ErrorAction SilentlyContinue
-          if (-not $sqlite) {
-            choco install sqlite --no-progress -y
-
-            # Ensure sqlite3 is immediately available in this job and subsequent steps.
-            $chocoBin = Join-Path $env:ProgramData 'chocolatey\bin'
-            if (Test-Path $chocoBin) {
-              $chocoBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-              $env:PATH = "$chocoBin;$env:PATH"
-            }
-
-            $sqlite = Get-Command sqlite3 -ErrorAction SilentlyContinue
-            if (-not $sqlite) {
-              throw 'sqlite3 was not found on PATH after Chocolatey install.'
-            }
-          }
-
-          sqlite3 --version
-
-      - run: pnpm install --frozen-lockfile
-        env:
-          SPROUTGIT_SKIP_PLAYWRIGHT_SETUP: '1'
-
-      - name: Install Playwright browsers (Linux/macOS)
-        if: runner.os != 'Windows'
-        run: pnpm exec playwright install --with-deps chromium
-
-      - name: Install Playwright browsers (Windows)
-        if: runner.os == 'Windows'
-        run: pnpm exec playwright install chromium
-
-      - name: Build E2E prerequisites
-        run: pnpm run test:e2e:build
-
-      - name: Run E2E tests (Linux)
-        if: runner.os == 'Linux'
-        run: xvfb-run -a pnpm run test:e2e
-        env:
-          SPROUTGIT_E2E_SKIP_BUILD: '1'
-
-      - name: Run E2E tests (macOS/Windows)
-        if: runner.os != 'Linux'
-        run: pnpm run test:e2e
-        env:
-          SPROUTGIT_E2E_SKIP_BUILD: '1'
-
-      - name: Report E2E test results
-        if: always()
-        uses: dorny/test-reporter@v1
+          $tmp = [System.IO.Path]::GetTempPath()
+          Write-Host "=== Chromium internal log (--log-file) ==="
+          $chromLog = Join-Path $tmp "electron-e2e-chromium.log"
+          if (Test-Path $chromLog) { Get-Content $chromLog | Select-Object -Last 200 } else { Write-Host "(not found)" }
+          Write-Host ""
+          Write-Host "=== electron-log main.log ==="
+          $appLog = "$env:APPDATA\SproutGit\logs\main.log"
+          if (Test-Path $appLog) { Get-Content $appLog | Select-Object -Last 200 } else { Write-Host "(not found)" }
+          Write-Host ""
+          Write-Host "=== sg-e2e-latest.log ==="
+          $sgLog = Join-Path $tmp "sg-e2e-latest.log"
+          if (Test-Path $sgLog) { Get-Content $sgLog } else { Write-Host "(not found)" }
+        working-directory: e2e
+      # ────────────────────────────────────────────────────────────────────
+      - uses: actions/upload-artifact@v4
+        if: failure()
         with:
-          name: E2E Tests (${{ matrix.os }})
-          path: test-results/e2e-junit.xml
-          reporter: java-junit
-          fail-on-error: false
-
-      - name: Upload Playwright artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: e2e-generated-${{ matrix.os }}
+          name: e2e-results-${{ matrix.platform }}
           path: |
-            test-results/e2e-junit.xml
-            test-results/playwright-report/**
-            test-results/playwright-output/**
-          if-no-files-found: warn
+            e2e/test-results/
+            tmp/playwright-report/
+          if-no-files-found: ignore
 
-  e2e-canary:
-    name: '04 · E2E · Canary (non-blocking)'
-    needs: [check-frontend, check-rust]
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    permissions:
-      contents: read
-      checks: write
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 9
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 20
-          cache: pnpm
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
-      - name: Install system dependencies (Linux)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xvfb sqlite3
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Install Playwright browsers
-        run: pnpm exec playwright install --with-deps chromium
-
-      - name: Build E2E prerequisites
-        run: pnpm run test:e2e:build
-
-      - name: Run canary E2E tests
-        run: xvfb-run -a pnpm run test:e2e:canary
-        env:
-          SPROUTGIT_E2E_SKIP_BUILD: '1'
-
-      - name: Report canary E2E test results
-        if: always()
-        uses: dorny/test-reporter@v1
-        with:
-          name: E2E Canary Tests
-          path: test-results/e2e-junit.xml
-          reporter: java-junit
-          fail-on-error: false
-
-      - name: Upload Playwright canary artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: e2e-canary-ubuntu-latest
-          path: |
-            test-results/e2e-junit.xml
-            test-results/playwright-report/**
-            test-results/playwright-output/**
-          if-no-files-found: warn
-
-  rust-coverage:
-    name: '05 · Rust · Coverage (Linux)'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
-      - name: Install system dependencies (Linux)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-
-      - name: Install cargo-tarpaulin
-        run: cargo install cargo-tarpaulin --version 0.35.2 --locked
-
-      - name: Generate coverage
-        working-directory: src-tauri
-        run: |
-          cargo tarpaulin --out Xml --output-dir coverage --timeout 300 --all-targets
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          directory: ./src-tauri/coverage
-          flags: rust-backend
-          os: ubuntu-latest
-          files: ./src-tauri/coverage/cobertura.xml
-          fail_ci_if_error: false
-          verbose: true
-
-  build:
-    name: '06 · Release · Build Artifacts (${{ matrix.os }})'
-    needs: [check-frontend, check-rust, e2e-generated]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    environment: CI
-    runs-on: ${{ matrix.os }}
-    permissions:
-      contents: read
-      actions: write
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    steps:
-      - uses: actions/checkout@v6
-
-      - uses: pnpm/action-setup@v6
-        with:
-          version: 9
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 20
-          cache: pnpm
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri
-
-      # Linux: install Tauri system deps
-      - name: Install system dependencies (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Validate updater signing key
-        shell: bash
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        run: |
-          set -euo pipefail
-
-          if [[ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]]; then
-            echo "::error::Missing TAURI_SIGNING_PRIVATE_KEY secret."
-            exit 1
-          fi
-
-          normalized_key="$(printf '%s' "${TAURI_SIGNING_PRIVATE_KEY}" | tr -d '\r\n\t ')"
-          if [[ ${#normalized_key} -lt 120 ]]; then
-            echo "::error::TAURI_SIGNING_PRIVATE_KEY looks too short. Use the full private key content from ~/.tauri/*.key."
-            exit 1
-          fi
-
-          # Accept both formats used in practice:
-          # 1) single-line encoded key (common in ~/.tauri/*.key)
-          # 2) minisign-style key material with comment + encoded line
-          if [[ ! "${normalized_key}" =~ ^[A-Za-z0-9+/=]+$ ]]; then
-            echo "::error::TAURI_SIGNING_PRIVATE_KEY contains unexpected characters. Paste the private key exactly as generated."
-            exit 1
-          fi
-
-      - name: Set version
-        shell: bash
-        run: |
-          VERSION="${BASE_VERSION}.${{ github.run_number }}"
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > src-tauri/tauri.conf.json.tmp
-          mv src-tauri/tauri.conf.json.tmp src-tauri/tauri.conf.json
-          sed -i.bak "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" src-tauri/Cargo.toml
-          rm src-tauri/Cargo.toml.bak
-
-      - name: Build Tauri app
-        run: pnpm tauri build
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-
-      - name: Upload artifacts (macOS)
-        if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
-        with:
-          name: SproutGit-macos-${{ runner.arch }}
-          path: |
-            src-tauri/target/release/bundle/macos/*.app.tar.gz
-            src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
-            src-tauri/target/release/bundle/dmg/*.dmg
-
-      - name: Upload artifacts (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
-        with:
-          name: SproutGit-windows
-          path: |
-            src-tauri/target/release/bundle/msi/*.msi
-            src-tauri/target/release/bundle/msi/*.msi.sig
-
-      - name: Upload artifacts (Linux)
-        if: runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
-        with:
-          name: SproutGit-linux
-          path: |
-            src-tauri/target/release/bundle/appimage/*.AppImage
-            src-tauri/target/release/bundle/appimage/*.AppImage.sig
-
+  # ── Release ───────────────────────────────────────────────────────────────
   release:
-    name: '07 · Release · Publish'
-    needs: build
+    name: Create release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, e2e]
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      pull-requests: read
+      contents: write   # needed to create the GitHub Release
     steps:
-      - name: Download release build artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
         with:
-          pattern: SproutGit-*
           path: artifacts
-
-      - name: Generate latest.json
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          VERSION="${BASE_VERSION}.${{ github.run_number }}"
-          TAG="v${VERSION}"
-          DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          BASE_URL="https://github.com/InterestingSoftware/SproutGit/releases/download/${TAG}"
-
-          find_required_artifact() {
-            local artifact_dir="$1"
-            local pattern="$2"
-            local label="$3"
-            local artifact_path
-
-            if [[ ! -d "$artifact_dir" ]]; then
-              echo "::error::Missing artifact directory for ${label}: '${artifact_dir}'."
-              exit 1
-            fi
-
-            artifact_path=$(find "$artifact_dir" -type f -name "$pattern" | head -n 1)
-
-            if [[ -z "$artifact_path" ]]; then
-              echo "::error::Missing ${label} artifact. Expected '${pattern}' under '${artifact_dir}'."
-              exit 1
-            fi
-
-            if [[ ! -f "${artifact_path}.sig" ]]; then
-              echo "::error::Missing signature for ${label} artifact: '${artifact_path}.sig'."
-              exit 1
-            fi
-
-            printf '%s\n' "$artifact_path"
-          }
-
-          LINUX_IMG=$(find_required_artifact "artifacts/SproutGit-linux" "*.AppImage" "Linux")
-          LINUX_SIG=$(cat "${LINUX_IMG}.sig")
-          LINUX_FILENAME=$(basename "$LINUX_IMG")
-
-          WIN_MSI=$(find_required_artifact "artifacts/SproutGit-windows" "*.msi" "Windows")
-          WIN_SIG=$(cat "${WIN_MSI}.sig")
-          WIN_FILENAME=$(basename "$WIN_MSI")
-
-          MAC_DIR=$(find artifacts -maxdepth 1 -type d -name "SproutGit-macos-*" | head -n 1)
-          if [[ -z "$MAC_DIR" ]]; then
-            echo "::error::Missing macOS artifact directory. Expected one matching 'artifacts/SproutGit-macos-*'."
-            exit 1
-          fi
-
-          MAC_APP=$(find_required_artifact "$MAC_DIR" "*.app.tar.gz" "macOS updater")
-          MAC_SIG=$(cat "${MAC_APP}.sig")
-          MAC_FILENAME=$(basename "$MAC_APP")
-          MAC_DIRNAME=$(basename "$MAC_DIR")
-
-          MAC_PLATFORM=""
-          if [[ "$MAC_FILENAME" == *"aarch64"* ]]; then
-            MAC_PLATFORM="darwin-aarch64"
-          elif [[ "$MAC_FILENAME" == *"x64"* ]] || [[ "$MAC_FILENAME" == *"x86_64"* ]]; then
-            MAC_PLATFORM="darwin-x86_64"
-          elif [[ "$MAC_DIRNAME" == *"ARM64"* ]]; then
-            MAC_PLATFORM="darwin-aarch64"
-          elif [[ "$MAC_DIRNAME" == *"X64"* ]]; then
-            MAC_PLATFORM="darwin-x86_64"
-          else
-            echo "::error::Could not infer macOS architecture from updater artifact '${MAC_FILENAME}' in directory '${MAC_DIRNAME}'."
-            exit 1
-          fi
-
-          jq -n \
-            --arg version "$VERSION" \
-            --arg date "$DATE" \
-            --arg linux_url "${BASE_URL}/${LINUX_FILENAME}" \
-            --arg linux_sig "$LINUX_SIG" \
-            --arg win_url "${BASE_URL}/${WIN_FILENAME}" \
-            --arg win_sig "$WIN_SIG" \
-            --arg mac_url "${BASE_URL}/${MAC_FILENAME}" \
-            --arg mac_sig "$MAC_SIG" \
-            --arg mac_platform "$MAC_PLATFORM" \
-            '{
-              version: $version,
-              pub_date: $date,
-              platforms: {
-                "linux-x86_64":   {url: $linux_url, signature: $linux_sig},
-                "windows-x86_64": {url: $win_url,   signature: $win_sig}
-              }
-            }
-            | .platforms[$mac_platform] = {url: $mac_url, signature: $mac_sig}
-            | .platforms[($mac_platform + "-app")] = {url: $mac_url, signature: $mac_sig}
-            ' > latest.json
-
-      - name: Extract PR release notes
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
-        run: |
-          set -euo pipefail
-          python3 - <<'PY' > pr_release_notes.txt
-          import json
-          import os
-          import re
-          import subprocess
-          from typing import Any
-
-
-          def gh_api(path: str, *, accept: str | None = None) -> Any:
-            cmd = ['gh', 'api', path]
-            if accept:
-              cmd.extend(['--header', f'Accept: {accept}'])
-            out = subprocess.check_output(cmd, text=True)
-            return json.loads(out)
-
-
-          def extract_release_notes(body: str) -> str:
-            match = re.search(r'^## Release Notes\s*\n(.*?)(?=^## |\Z)', body, re.M | re.S)
-            return match.group(1).strip() if match else ''
-
-
-          repo = os.environ['GITHUB_REPOSITORY']
-          head_sha = os.environ['GITHUB_SHA']
-          before_sha = os.environ.get('GITHUB_EVENT_BEFORE', '')
-
-          latest_tag = ''
-          try:
-            latest_release = gh_api(f'repos/{repo}/releases/latest')
-            latest_tag = (latest_release.get('tag_name') or '').strip()
-          except Exception:
-            latest_tag = ''
-
-          commit_entries: list[dict[str, str]]
-          if latest_tag:
-            compare = gh_api(f'repos/{repo}/compare/{latest_tag}...{head_sha}')
-            commit_entries = [
-              {
-                'sha': c.get('sha') or '',
-                'message': (c.get('commit') or {}).get('message') or '',
-              }
-              for c in compare.get('commits', [])
-              if c.get('sha')
-            ]
-          elif before_sha and before_sha != head_sha and before_sha != ('0' * 40):
-            compare = gh_api(f'repos/{repo}/compare/{before_sha}...{head_sha}')
-            commit_entries = [
-              {
-                'sha': c.get('sha') or '',
-                'message': (c.get('commit') or {}).get('message') or '',
-              }
-              for c in compare.get('commits', [])
-              if c.get('sha')
-            ]
-          else:
-            single = gh_api(f'repos/{repo}/commits/{head_sha}')
-            commit_entries = [
-              {
-                'sha': single.get('sha') or head_sha,
-                'message': (single.get('commit') or {}).get('message') or '',
-              }
-            ]
-
-          commit_shas = [entry['sha'] for entry in commit_entries if entry.get('sha')]
-
-          pr_order: list[int] = []
-          pr_seen: set[int] = set()
-          pulls_accept = 'application/vnd.github+json'
-
-          for sha in commit_shas:
-            pulls = gh_api(f'repos/{repo}/commits/{sha}/pulls', accept=pulls_accept)
-            for pr in pulls:
-              number = pr.get('number')
-              if not isinstance(number, int):
-                continue
-              if number in pr_seen:
-                continue
-              # Keep only merged PRs so notes reflect released changes.
-              if not pr.get('merged_at'):
-                continue
-              pr_seen.add(number)
-              pr_order.append(number)
-
-          sections: list[str] = []
-          for number in pr_order:
-            pr = gh_api(f'repos/{repo}/pulls/{number}')
-            notes = extract_release_notes(pr.get('body') or '')
-            if not notes:
-              continue
-            title = pr.get('title') or f'PR #{number}'
-            sections.append(f'### PR #{number}: {title}\n\n{notes}')
-
-          commit_lines: list[str] = []
-          for entry in commit_entries:
-            sha = (entry.get('sha') or '').strip()
-            if not sha:
-              continue
-            message = (entry.get('message') or '').strip()
-            subject = message.splitlines()[0].strip() if message else '(no subject)'
-            commit_lines.append(f'- `{sha[:7]}` {subject}')
-
-          if sections:
-            print('\n\n'.join(sections), end='')
-          else:
-            print('No PR release notes were found for merged PRs in this release.', end='')
-
-          if commit_lines:
-            print('\n\n## Commits Included\n')
-            print('\n'.join(commit_lines), end='')
-          PY
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ env.BASE_VERSION }}.${{ github.run_number }}
-          name: v${{ env.BASE_VERSION }}.${{ github.run_number }}
-          body_path: pr_release_notes.txt
-          generate_release_notes: false
-          files: |
-            artifacts/SproutGit-linux/**/*.AppImage
-            artifacts/SproutGit-linux/**/*.AppImage.sig
-            artifacts/SproutGit-windows/**/*.msi
-            artifacts/SproutGit-windows/**/*.msi.sig
-            artifacts/SproutGit-macos-*/**/*.app.tar.gz
-            artifacts/SproutGit-macos-*/**/*.app.tar.gz.sig
-            artifacts/SproutGit-macos-*/**/*.dmg
-            latest.json
+          files: artifacts/**
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}

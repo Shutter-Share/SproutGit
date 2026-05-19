@@ -1,22 +1,33 @@
 {
   "env": {
     "browser": true,
-    "es2021": true,
+    "es2022": true,
     "node": true
   },
   "globals": {
-    "window": "readonly",
-    "document": "readonly",
-    "navigator": "readonly",
-    "fetch": "readonly"
+    "window": "readonly"
   },
   "rules": {
-    "no-console": ["warn", { "allow": ["warn", "error", "log"] }],
-    "no-unused-expressions": "off",
+    "no-console": "warn",
     "no-debugger": "warn",
     "no-eval": "error",
     "no-implied-eval": "error",
     "no-unused-vars": "off",
-    "prefer-const": "off"
-  }
+    "prefer-const": "warn",
+    "react/react-in-jsx-scope": "off",
+    "react/rules-of-hooks": "error",
+    "react/jsx-key": "error"
+  },
+  "plugins": ["react"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn"
+  },
+  "ignorePatterns": [
+    "node_modules",
+    "**/out/**",
+    "**/dist-electron/**",
+    "**/*.d.ts",
+    "old/**"
+  ]
 }

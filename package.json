@@ -1,83 +1,35 @@
 {
-  "name": "sprout-git",
-  "version": "0.1.0",
-  "description": "SproutGit: a fast, worktree-first cross-platform Git desktop app",
-  "type": "module",
+  "name": "sproutgit",
+  "private": true,
   "scripts": {
-    "dev": "vite dev",
-    "build": "svelte-kit sync && vite build",
-    "preview": "vite preview",
-    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-    "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-    "lint": "oxlint",
-    "lint:docs": "node scripts/check-doc-drift.mjs",
-    "lint:fix": "oxlint --fix",
-    "format": "prettier --write .",
-    "format:check": "prettier --check .",
-    "test": "pnpm run test:security",
-    "test:security": "cd src-tauri && cargo test --all-targets",
-    "test:unit": "vitest run",
-    "setup:playwright": "node scripts/setup-playwright.mjs",
-    "cleanup:rust-targets": "node scripts/cleanup-rust-targets.mjs",
-    "cleanup:rust-targets:delete": "node scripts/cleanup-rust-targets.mjs --delete",
-    "tauri": "tauri",
-    "test:e2e:build": "pnpm tauri build --config src-tauri/tauri.e2e.conf.json --no-bundle --features e2e-testing",
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "test": "turbo test",
     "test:e2e": "playwright test -c e2e/playwright.config.ts",
-    "test:e2e:full": "pnpm run test:e2e",
-    "test:e2e:screenshots": "cross-env CAPTURE_SCREENSHOTS=1 PLAYWRIGHT_SCREENSHOT_TARGET=./website/src/assets/screenshots pnpm exec playwright test -c e2e/playwright.config.ts --grep @screenshots",
-    "test:e2e:screenshots:fresh": "pnpm run test:e2e:build && pnpm run test:e2e:screenshots",
-    "test:e2e:canary": "cross-env RUN_CANARY=1 pnpm exec playwright test -c e2e/playwright.config.ts --grep @canary",
-    "test:tauri": "pnpm run test:e2e",
-    "prepare": "husky && pnpm run setup:playwright"
-  },
-  "license": "MIT",
-  "pnpm": {
-    "overrides": {
-      "cookie": "0.7.2",
-      "dompurify": "3.4.0"
-    },
-    "ignoredBuiltDependencies": [
-      "better-sqlite3"
-    ]
-  },
-  "dependencies": {
-    "@fontsource/fira-code": "^5.2.7",
-    "@fontsource/plus-jakarta-sans": "^5.2.8",
-    "@fontsource/space-grotesk": "^5.2.10",
-    "@monaco-editor/loader": "^1.7.0",
-    "@tauri-apps/api": "^2.11.0",
-    "@tauri-apps/plugin-dialog": "^2.7.1",
-    "@tauri-apps/plugin-opener": "^2.5.4",
-    "@tauri-apps/plugin-process": "^2.3.1",
-    "@tauri-apps/plugin-updater": "^2.10.1",
-    "@xterm/addon-fit": "^0.11.0",
-    "@xterm/addon-web-links": "^0.12.0",
-    "@xterm/xterm": "^6.0.0",
-    "highlight.js": "^11.11.1",
-    "lucide-svelte": "^1.0.1",
-    "monaco-editor": "^0.55.1"
+    "test:e2e:screenshots": "cross-env CAPTURE_SCREENSHOTS=1 PLAYWRIGHT_SCREENSHOT_TARGET=./website/src/assets/screenshots playwright test -c e2e/playwright.config.ts --grep @screenshots",
+    "screenshots": "pnpm --filter @sproutgit/e2e screenshots",
+    "lint": "oxlint --config .oxlintrc.json app/src packages/ui/src packages/git/src packages/terminal/src packages/types/src",
+    "typecheck": "turbo typecheck",
+    "format": "prettier --write \"**/*.{ts,tsx,json,css,md}\" --ignore-path .gitignore",
+    "postinstall": "node scripts/patch-electron-plist.mjs"
   },
   "devDependencies": {
-    "@faker-js/faker": "^10.4.0",
-    "@playwright/test": "^1.59.1",
-    "@srsholmes/tauri-playwright": "^0.2.2",
-    "@sveltejs/adapter-static": "^3.0.10",
-    "@sveltejs/kit": "^2.59.1",
-    "@sveltejs/vite-plugin-svelte": "^7.1.1",
-    "@tailwindcss/vite": "^4.2.4",
-    "@tauri-apps/cli": "^2.11.0",
-    "@vitest/ui": "^4.1.5",
+    "concurrently": "^9.2.1",
     "cross-env": "^10.1.0",
-    "husky": "^9.1.7",
-    "jsdom": "^29.1.1",
-    "oxlint": "^1.63.0",
+    "oxlint": "^1.64.0",
     "prettier": "^3.8.3",
-    "prettier-plugin-svelte": "^3.5.1",
-    "svelte": "^5.55.5",
-    "svelte-check": "^4.4.8",
-    "tailwindcss": "^4.2.4",
-    "typescript": "~6.0.3",
-    "vite": "^8.0.10",
-    "vitest": "^4.1.5"
+    "turbo": "^2.9.12"
+  },
+  "packageManager": "pnpm@11.1.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/InterestingSoftware/SproutGit.git"
+  },
+  "homepage": "https://github.com/InterestingSoftware/SproutGit#readme",
+  "bugs": {
+    "url": "https://github.com/InterestingSoftware/SproutGit/issues"
   }
 }
