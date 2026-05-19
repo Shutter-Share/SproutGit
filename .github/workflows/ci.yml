@@ -262,8 +262,7 @@ jobs:
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref == 'refs/heads/main' && format('main-{0}', github.run_number) || github.ref_name }}
-          name: ${{ github.ref == 'refs/heads/main' && format('Main build {0}', github.run_number) || github.ref_name }}
+          tag_name: ${{ github.ref == 'refs/heads/main' && format('v0.1.{0}', github.run_number) || github.ref_name }}
           files: artifacts/**
           generate_release_notes: true
-          prerelease: ${{ github.ref == 'refs/heads/main' || contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(github.ref_name, '-') }}
